@@ -559,9 +559,9 @@ void NMEAtor::convertNMEA()
   }
 
 
-  //*** current $IIHDG & $IIHDM sentences are causing issues in my navigational app
+  //*** current $IIHDG,$IIHDM & $IIVHW sentences are causing issues in my navigational app
   //*** so its been filtered out here
-  if ( nmeaTag == _HDM || nmeaTag == _HDG ) {
+  if ( nmeaTag == _HDM || nmeaTag == _HDG || nmeaTag==_VHW) {
     nmeaSentence = "";
     return;
   }
