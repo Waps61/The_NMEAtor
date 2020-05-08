@@ -4,15 +4,12 @@
   URL:      https://www.hackster.io/waps61
   Date:     30-04-2020
   Last
-  Update:   03-05-2020
-  Credit:   Based on Alan Burlison's Task Scheduler Library
-            The following is Copyright Alan Burlison, 2011
-            Original Source Code:  http://bleaklow.com/files/2010/Task.tar.gz
-            Original Reference:   http://bleaklow.com/2010/07/20/a_very_simple_arduino_task_manager.html
+  Update:   08-05-2020
   Purpose:  Build an NMEA0183 manupulator and animator for on board of my sailing boat
             supporting following types of tasks:
-            - Reading NMEA0183 v1.5 data withou a checksum,
-            - Filtering out current HGD data causing incorrect course in fo in navigation app
+            - Reading NMEA0183 v1.5 data without a checksum,
+            - Filtering out current heading data causing incorrect course in fo in navigation app
+              i.e. HDG, HDM and VHW messages
             - Getting new course and roll & pitch data from a MPU9250
             - Inject this new data into the datastream (aka multiplexing)
 
@@ -22,25 +19,42 @@
             - TriggeredTask - Runs when triggered by an external source, like reading NMEA data
 
 
+  NOTE:     NMEA encoding conventions in short
+            An NMEA sentence consists of a start delimiter, followed by a comma-separated sequence
+            of fields, followed by the character '*' (ASCII 42), the checksum and an end-of-line marker.
+            i.e. <start delimiter><field 0>,<field 1>,,,<field n>*<checksum><end-of-linemarker>
+            The start delimiter is either $ or !. <field 0> contains the tag and the remaining fields
+            the values. The tag is normaly a 5 character wide identifier where the 1st 2 characters
+            identify the talker ID and the last 3 identify the sentence ID.
+            Maximum sentence length, including the $ and <CR><LF> is 82 bytes.
 
-  Source: https://github.com/gadgetstogrow/TaskScheduler
+  Source: https://gpsd.gitlab.io/gpsd/NMEA.html#_nmea_0183_physical_protocol_layer
 
 
-  Tutorial: https://www.hackster.io/GadgetsToGrow/don-t-delay-use-an-arduino-task-scheduler-today-215cfe
 
-    Serial is reserved for the MPU9250 communication
-    Serial1 is reserved for NMEA communication
-  Pinout Arduino Mega 2560 R3:
-        PIN     PURPOSE                 TASK TYPE
-        --------------------------------------------------------------------
-        A0:
-        Pin 3:
-        Pin 4:
-        Pin 5:
-        Pin 13:
 
-        USB Port: TX/RX Debugger data to Serial Monitor -Task
- **********************************************************************************/
+  TODO: Serial is reserved for the MPU9250 communication
+        Serial1 is reserved for NMEA communication
+        Pinout Arduino Mega 2560 R3:
+          PIN     PURPOSE                 TASK TYPE
+          --------------------------------------------------------------------
+          A0:
+          Pin 3:
+          Pin 4:
+          Pin 5:
+          Pin 13:
+
+          USB Port: TX/RX Debugger data to Serial Monitor -Task
+
+   Credit:   Based on Alan Burlison's Task Scheduler Library
+              The following is Copyright Alan Burlison, 2011
+              Original Source Code:  http://bleaklow.com/files/2010/Task.tar.gz
+              Original Reference:   http://bleaklow.com/2010/07/20/a_very_simple_arduino_task_manager.html
+
+              Source: https://github.com/gadgetstogrow/TaskScheduler
+              Tutorial: https://www.hackster.io/GadgetsToGrow/don-t-delay-use-an-arduino-task-scheduler-today-215cfe
+
+*/
 
 /**********************************************************************************
     Include the necessary libraries
@@ -64,19 +78,23 @@
 /***********************************************************************************
    Definitions go here
 */
-// ***
 // *** Conditional Debug Info to Serial Monitor
-// *** by commenting this line, a debugger will not be instantiated,
-// *** or added to the TaskScheduler's tasks list. All ptrDebugger->debugWrite()
-// *** calls will be ignored.
+// *** by setting DEBUG to 0 debugger steatements will be ommitted from the code
+// ***
 // ***
 #define DEBUG 1
+
+//*** The maximum number of fields in an NMEA string
+//*** The number is based on the largest sentence MDA,
+//***  the Meteorological Composite sentence
+#define MAX_NMEA_FIELDS 21
 
 //*** define NMEA tags to be used
 //*** make sure you know your Talker ID used in the sentences
 //*** In my case next to GP for navigation related sentences
-//*** II is used for INtegrated Instruments and
+//*** II is used for Integrated Instruments and
 //*** PS is used for vendor specific tags like Stowe Marine
+//*** AO is used for my Andruino generated sentences
 #define _GLL "$GPGLL"   // Geographic Position – Latitude/Longitude
 #define _GGA "$GPGGA"   // GPS Fix Data. Time, Position and fix related data for a GPS receiver
 #define _GSA "$GPGSA"   // GPS DOP and active satellites
@@ -105,17 +123,59 @@
 #define _XTE "$IIXTE"  //  Cross-Track Error – Measured
 #define _XTR "$IIXTR"  //  Cross Track Error – Dead Reckoning
 #define _ZDA "$IIZDA"  //  Time & Date - UTC, day, month, year and local time zone
-//*** Some specific Robertson / Stowe Marine tages below
+//*** Some specific Robertson / Stowe Marine tags below
 #define _TON "$PSTON"  // Distance Nautical
 #define _TOE "$PSTOE"  // Engine hours
 #define _TOB "$PSTOB"  // Battery voltage
 #define _TOD "$PSTOD"  // depth transducer below waterline in feet
+//*** Arduino generated TAGS
+#define _xDR "$AOXDR" // Transducer measurement
+/* SPECIAL NOTE:
+  XDR - Transducer Measurement
+        1 2   3 4            n
+        | |   | |            |
+  $--XDR,a,x.x,a,c--c, ..... *hh<CR><LF>
+  Field Number:   1:Transducer Type
+                2:Measurement Data
+                3:Units of measurement
+                4:Name of transducer
+
+  There may be any number of quadruplets like this, each describing a sensor. The last field will be a checksum as usual.
+  Example:
+  $HCXDR,A,171,D,PITCH,A,-37,D,ROLL,G,367,,MAGX,G,2420,,MAGY,G,-8984,,MAGZ*41
+*/
+
+/*
+   If there is some special treatment needed for some NMEA sentences then
+   add the their definitions to the NMEA_SPECIALTY definition
+   The pre-compiler concatenates string literals by using "" in between
+*/
+#define NMEA_SPECIALTY ""_HDM""_HDG""_DBK""_VHW
 
 //*** Some conversion factors
 #define FTM  0.3048        // feet to meters
 #define MTF  3.28084       // meters to feet
 #define NTK  1.852         // nautical mile to km
 #define KTN  0.5399569     // km to nautical mile
+
+/***********************************************************************************
+   Structures go here
+*/
+//*** A structure to hold the NMEA data
+
+struct NMEAData {
+  String fields[ MAX_NMEA_FIELDS ];
+  byte nrOfFields;
+  String sentence;
+
+};
+
+
+/***********************************************************************************
+   Class definitions go here
+*/
+
+
 
 /*****************************************************************************************
    Class:    NMEADebugger
@@ -132,9 +192,8 @@
 
         To output debug information use: ptrDebugger->debugWrite("debug info");
 
-  Notes:    Yeah, I lazily used the String() function in this demonstration. Suedfbvbvfbfvvvvvvvb  me.
+  Notes:    Yeah, I lazily used the String() function in this demonstration. Sue me.
 ******************************************************************************************/
-
 // ***
 // *** Define the NMEADebugger Class as type Task
 // ***
@@ -172,6 +231,7 @@ void NMEADebugger::run(uint32_t now)
 {
   uint16_t byteCount = 0;
 
+#ifdef DEBUG
   Serial.println("-----------------");
   Serial.println("NMEA Input Received...");
   Serial.println("-----------------");
@@ -192,12 +252,12 @@ void NMEADebugger::run(uint32_t now)
   Serial.println("-----------------");
   Serial.print("Bytes Received: "); Serial.println(String(byteCount));
   Serial.println("-----------------");
-
+#endif
 }
 
 // ***
 // *** NMEADebugger::debugWrite() <--provides basic debug info from other tasks
-// ***
+// *** takes a String as input parameter
 void NMEADebugger::debugWrite(String debugMsg)
 {
   Serial.println(debugMsg);
@@ -205,10 +265,200 @@ void NMEADebugger::debugWrite(String debugMsg)
 
 // ***
 // *** NMEADebugger::debugWrite() <--provides basic debug info from other tasks
-// ***
+// *** takes a float and nr of decimals as input parameters
 void NMEADebugger::debugWrite(float debugValue, int decimals = 2)
 {
   Serial.println(debugValue, decimals);
+}
+
+/*****************************************************************************************
+  Define the NMEAtor Class as type TriggeredTask
+
+  Demonstrate basic serial communication functionality reading NMEA data from the register.
+  An RS232 to TTL  cnverter or RS484 shifter should be used to prevent frying the Arduino board
+
+  Hardware setup:
+  Wiring Diagram (for RS-232 to TTL converter MAX3232)
+  NMEA-0183 | MAX3232 | ARDUINO
+     TX     |  T1 OUT |
+            |  R1 OUT | Receive Pin
+
+  Wiring Diagram (for RS-422 / RS-485 shifter)
+  NMEA-0183 | RS-422/485 Shifter | ARDUINO
+    NMEA+   |     B              |
+    NMEA-   |     A              |
+            |     VCC            |  5V
+            |     GND            |  Ground
+            |     RE             |  Ground
+            |     RO             |  Receive Pin
+
+
+*****************************************************************************************/
+class NMEAtor : public TriggeredTask
+{
+  public:
+    NMEAtor(long int _rate, NMEADebugger *_ptrDebugger);
+    virtual void run(uint32_t now);
+    String nmeaSentence = "";
+    void parseNMEA(String nmeaIn ); // parse an NMEA sentence with each part stored in the array
+
+  private:
+    uint32_t rate;
+    NMEADebugger *ptrDebugger;
+    MPU9250 mpu9250;
+    String NMEAFilter = NMEA_SPECIALTY;
+    NMEAData nmeaData;  // self explaining
+
+    String checksum( String str ); //calculate the checksum for str
+    String nmeaSpecialty( NMEAData nmeaIn ); // special treatment function
+};
+
+// ***
+// *** NMEAtor Constructor
+// *** input parameters:
+// *** reference to the debugger object
+NMEAtor::NMEAtor(long int _rate, NMEADebugger *_ptrDebugger)
+  : TriggeredTask(),
+    ptrDebugger(_ptrDebugger)
+{
+  Wire.begin();
+
+  Serial1.begin(_rate);
+
+
+}
+
+// ***
+// *** NMEAtor::run() <--executed by TaskScheduler as a result of canRun() returning true.
+// ***
+void NMEAtor::run(uint32_t now)
+{
+  // *** proces the nmeaSentence here
+
+#ifdef DEBUG
+  // Print raw NMEA sentences
+  ptrDebugger->debugWrite("-----Raw NMEA Data received on serial port 1-----");
+  ptrDebugger->debugWrite( nmeaSentence);
+#endif
+
+  parseNMEA(nmeaSentence );
+
+
+#ifdef DEBUG
+  ptrDebugger->debugWrite("-----New NMEA Data processed on serial port 1-----");
+  ptrDebugger->debugWrite( nmeaSentence);
+#endif
+
+
+  // ***
+  // *** resetRunnable() IMPORTANT! IMPORTANT!
+  // *** It's important to resetRunnable() after executing a TriggeredTask.
+  // *** If bool runFlag in a TriggeredTask is not reset, the TriggeredTask will
+  // *** continue to run indefinitely which defeats its purpose. It will stay dormant
+  // *** and be ignored by the TaskScheduler until triggered again.
+  // ***
+  resetRunnable();
+}
+
+
+
+/*
+
+*/
+String NMEAtor::nmeaSpecialty( NMEAData nmeaIn )
+{
+  String filter = NMEA_SPECIALTY;
+  if ( filter.indexOf( nmeaIn.fields[0]) > -1 )
+  {
+    /* In my on-board Robertson data network some sentences
+       are not NMEA0183 compliant. So these sentences need
+       to be converted to compliant sentences
+    */
+    //*** $IIDBK is not NMEA0183 compliant and needs conversion
+    if ( nmeaIn.fields[0] == _DBK ) {
+      // a typical non standard DBK message I receive is
+      // $IIDBK,A,0017.6,f,,,,
+      // Char A can also be a V if invalid and shoul be removed
+      // together with the , that follows
+      (nmeaIn.sentence).remove(7, 2); // Remove A or V and , cgar from string;
+      // so now we have $IIDBK,0017.6,f,,,,
+      int f = (nmeaIn.sentence).indexOf( 'f' ); // check if sentence is in feet
+      if ( f) {
+        // right trim the remaining comma's
+        nmeaIn.sentence = (nmeaIn.sentence).substring( 0, f ); // trim remaining chars
+        // so now we have $IIDBK,0017.6,f
+        // and we need the the feet  to convert to meters
+        int v = (nmeaIn.sentence).indexOf(',') + 1;
+        float ft = ((nmeaIn.sentence).substring( v, (f - v - 2) )).toFloat();
+        nmeaIn.sentence += "," + String( ft * FTM, 1) + ",M,,";
+        nmeaIn.sentence += checksum( nmeaIn.sentence );
+      }
+      return nmeaIn.sentence;
+    }
+    //*** current $IIHDG,$IIHDM & $IIVHW sentences are causing issues in my navigational app
+    //*** so its been filtered out here
+    if ( nmeaIn.fields[0] == _HDM || nmeaIn.fields[0] == _HDG || nmeaIn.fields[0] == _VHW) {
+      nmeaIn.sentence = "";
+      return nmeaIn.sentence;
+    }
+
+  }
+}
+
+
+
+// calculate checksum function (thanks to https://mechinations.wordpress.com)
+String NMEAtor::checksum( String str )
+{
+  byte cs = 0;
+  for (unsigned int n = 1; n < str.length() - 1; n++)
+  {
+    if ( str[n] != '&' || str[n] != '!' || str[n] != '*' )
+    {
+      cs ^= str[n];
+    }
+  }
+  if (cs < 0x10) return "0" + String(cs, HEX);
+  else return String(cs, HEX);
+
+
+}
+
+/*
+   parse an NMEA sentence into into an NMEAData structure.
+*/
+void NMEAtor::parseNMEA(String nmeaStr)
+{
+  nmeaData.nrOfFields = 0;
+  byte currentIndex = 0;
+  byte lastIndex = currentIndex;
+  byte sentenceLength = nmeaStr.length();
+  String newSentence = "";  // used to construct the new senctence
+  //*** check for a valid NMEA sentence
+  if ( nmeaStr[0] == '$' || nmeaStr[0] == '!' )
+  {
+    //*** parse the fields from the NMEA string
+    //*** keeping in mind that indeOf() can return -1 if not found!
+    while ( (currentIndex = nmeaStr.indexOf( ',', lastIndex)) > 0 )
+    {
+      //*** remember to sepatrate fields with the ',' character
+      //*** but do not end with one!
+      if ( lastIndex ) newSentence += ',';
+
+      //*** we want the data without the ',' in fields array
+      nmeaData.fields[ nmeaData.nrOfFields ] = nmeaStr.substring(lastIndex, currentIndex - 1);
+      newSentence += nmeaData.fields[ nmeaData.nrOfFields++];
+      lastIndex = currentIndex + 1; // searching from next char of ',' !
+    }
+    if ( NMEAFilter.indexOf( nmeaData.fields[0] ) > -1)
+    {
+      newSentence = nmeaSpecialty( nmeaData );
+    } else newSentence += checksum( newSentence);
+    nmeaData.sentence = newSentence;
+
+  }
+
+  return;
 }
 
 /*****************************************************************************************
@@ -258,11 +508,6 @@ MPU::MPU(NMEADebugger *_ptrDebugger)
   // TWBR = 12;  // 400 kbit/sec I2C speed
   Serial.begin(19200);
 
-  // Set up the interrupt pin, its set as active high, push-pull
-  //pinMode(intPin, INPUT);
-  //digitalWrite(intPin, LOW);
-  //pinMode(myLed, OUTPUT);
-  //digitalWrite(myLed, HIGH);
 
   // Read the WHO_AM_I register, this is a good test of communication
   byte c = mpu9250.readByte(MPU9250_ADDRESS, WHO_AM_I_MPU9250);
@@ -324,7 +569,6 @@ MPU::MPU(NMEADebugger *_ptrDebugger)
     while (1) ; // Loop forever if communication doesn't happen
   }
 
-  //pinMode(pin, OUTPUT);     // Set pin for output.
 }
 
 // ***
@@ -441,164 +685,13 @@ void MPU::run(uint32_t now)
   resetRunnable();
 }
 
-/*****************************************************************************************
-  Define the NMEAtor Class as type TriggeredTask
-
-  Demonstrate basic serial communication functionality reading NMEA data from the register.
-  An RS232 to TTL  cnverter or RS484 shifter should be used to prevent frying the Arduino board
-
-  Hardware setup:
-  Wiring Diagram (for RS-232 to TTL converter MAX3232)
-  NMEA-0183 | MAX3232 | ARDUINO
-     TX     |  T1 OUT |
-            |  R1 OUT | Receive Pin
-
-  Wiring Diagram (for RS-422 / RS-485 shifter)
-  NMEA-0183 | RS-422/485 Shifter | ARDUINO
-    NMEA+   |     B              |
-    NMEA-   |     A              |
-            |     VCC            |  5V
-            |     GND            |  Ground
-            |     RE             |  Ground
-            |     RO             |  Receive Pin
-
-
-*****************************************************************************************/
-class NMEAtor : public TriggeredTask
-{
-  public:
-    NMEAtor(NMEADebugger *_ptrDebugger);
-    virtual void run(uint32_t now);
-    String nmeaSentence = "";
-
-  private:
-    uint32_t rate;
-    NMEADebugger *ptrDebugger;
-    MPU9250 mpu9250;
-
-    void convertNMEA(); // parse the NMEA sentence and calculate checksum if not present
-    String checksum( String str ); //calculate the checksum for str
-};
-
-// ***
-// *** NMEAtor Constructor
-// *** input parameters:
-// *** reference to the debugger object
-NMEAtor::NMEAtor(NMEADebugger *_ptrDebugger)
-  : TriggeredTask(),
-    ptrDebugger(_ptrDebugger)
-{
-  Wire.begin();
-  // TWBR = 12;  // 400 kbit/sec I2C speed
-  Serial1.begin(4800);
-
-
-}
-
-// ***
-// *** NMEAtor::run() <--executed by TaskScheduler as a result of canRun() returning true.
-// ***
-void NMEAtor::run(uint32_t now)
-{
-  // *** proces the nmeaSentence here
-
-#ifdef DEBUG
-  // Print raw NMEA sentences
-  ptrDebugger->debugWrite("-----Raw NMEA Data received on serial port 1-----");
-  ptrDebugger->debugWrite( nmeaSentence);
-#endif
-
-  convertNMEA();
-
-#ifdef DEBUG
-  ptrDebugger->debugWrite("-----New NMEA Data processed on serial port 1-----");
-  ptrDebugger->debugWrite( nmeaSentence);
-#endif
-
-  // *** clear the nmeaSentence
-  nmeaSentence = "";
-  // ***
-  // *** resetRunnable() IMPORTANT! IMPORTANT!
-  // *** It's important to resetRunnable() after executing a TriggeredTask.
-  // *** If bool runFlag in a TriggeredTask is not reset, the TriggeredTask will
-  // *** continue to run indefinitely which defeats its purpose. It will stay dormant
-  // *** and be ignored by the TaskScheduler until triggered again.
-  // ***
-  resetRunnable();
-}
-
-void NMEAtor::convertNMEA()
-{
-  // get the NMEA-tag from the 1st 6 characters
-  String nmeaTag[6] = nmeaSentence.substring(0, 6);
-
-  /* In my on-board Robertson data network some sentences
-     are not NMEA0183 compliant. So these sentences need
-     to be converted to compliant sentences
-  */
-  //*** $IIDBK is not NMEA0183 compliant and needs conversion
-  if ( nmeaTag == _DBK ) {
-    // a typical non standard DBK message I receive is
-    // $IIDBK,A,0017.6,f,,,,
-    // Char A can also be a V if invalid and shoul be removed
-    // together with the , that follows
-    nmeaSentence.remove(7, 2); // Remove A or V and , cgar from string;
-    // so now we have $IIDBK,0017.6,f,,,,
-    int f = nmeaSentence.indexOf( 'f' ); // check if sentence is in feet
-    if ( f) {
-      // right trim the remaining comma's
-      nmeaSentence = nmeaSentence.substring( 0, f ); // trim remaining chars
-      // so now we have $IIDBK,0017.6,f
-      // and we need the the feet  to convert to meters
-      int v = nmeaSentence.indexOf(',') + 1;
-      float ft = (nmeaSentence.substring( v, (f - v - 2) )).toFloat();
-      nmeaSentence += "," + String( ft * FTM, 1) + ",M,,";
-      nmeaSentence += checksum( nmeaSentence );
-    }
-    return;
-  }
-
-
-  //*** current $IIHDG,$IIHDM & $IIVHW sentences are causing issues in my navigational app
-  //*** so its been filtered out here
-  if ( nmeaTag == _HDM || nmeaTag == _HDG || nmeaTag==_VHW) {
-    nmeaSentence = "";
-    return;
-  }
-
-  //*** $GP an !AI messages already contain a checksum and can be skipped
-  //*** this can be checked by the existance of the char '*'
-  if ( nmeaSentence.indexOf( '*' ) ) {
-    return;
-  } else {
-    nmeaSentence += checksum( nmeaSentence );
-    return;
-  }
-}
-
-// calculate checksum function (thanks to https://mechinations.wordpress.com)
-String NMEAtor::checksum( String str )
-{
-  byte cs = 0;
-  for (unsigned int n = 1; n < str.length() - 1; n++)
-  {
-    if ( str[n] != '&' || str[n] != '!' || str[n] != '*' )
-    {
-      cs ^= str[n];
-    }
-  }
-  if (cs < 0x10) return "0" + String(cs, HEX);
-  else return String(cs, HEX);
-
-
-}
-
-/*
-   Declare global variables here
+/***********************************************************************************
+   Global variables go here
 */
+
 NMEADebugger    debugger;
 MPU             mpu(&debugger);
-NMEAtor         nmeator(&debugger);
+NMEAtor         nmeator( 4800, &debugger);
 
 
 
