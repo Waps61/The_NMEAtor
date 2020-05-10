@@ -4,7 +4,8 @@
   URL:      https://www.hackster.io/waps61
   Date:     30-04-2020
   Last
-  Update:   08-05-2020
+  Update:   10-05-2020
+  Achieved: NMEAParser is working correctly
   Purpose:  Build an NMEA0183 manupulator and animator for on board of my sailing boat
             supporting following types of tasks:
             - Reading NMEA0183 v1.5 data without a checksum,
@@ -78,16 +79,19 @@
 /***********************************************************************************
    Definitions go here
 */
-// *** Conditional Debug Info to Serial Monitor
-// *** by setting DEBUG to 0 debugger steatements will be ommitted from the code
-// ***
-// ***
+// *** Conditional Debug & Test Info to Serial Monitor
+// *** by commenting out the line(s) below the debugger and or test statements will 
+// *** be ommitted from the code
+
 #define DEBUG 1
+#define TEST 1
 
 //*** The maximum number of fields in an NMEA string
 //*** The number is based on the largest sentence MDA,
 //***  the Meteorological Composite sentence
 #define MAX_NMEA_FIELDS 21
+
+#define STACKSIZE 15  // Size of the stack; adjust according use
 
 //*** define NMEA tags to be used
 //*** make sure you know your Talker ID used in the sentences
@@ -163,12 +167,13 @@
 */
 //*** A structure to hold the NMEA data
 
-struct NMEAData {
+typedef struct {
   String fields[ MAX_NMEA_FIELDS ];
   byte nrOfFields;
   String sentence;
 
-};
+}NMEAData ;
+
 
 
 /***********************************************************************************
@@ -252,7 +257,10 @@ void NMEADebugger::run(uint32_t now)
   Serial.println("-----------------");
   Serial.print("Bytes Received: "); Serial.println(String(byteCount));
   Serial.println("-----------------");
+  
 #endif
+
+
 }
 
 // ***
@@ -270,6 +278,76 @@ void NMEADebugger::debugWrite(float debugValue, int decimals = 2)
 {
   Serial.println(debugValue, decimals);
 }
+
+/*
+ * Class NMEAStack
+ * A class to push and pop NMEA structs on a stack and can act as a buffer
+ */
+
+ class NMEAStack
+ {
+  public:
+  NMEAStack();  // Constructor with the size of the stack
+  int push( NMEAData _nmea );   // put an NMEAData struct on the stack and returns the lastIndex or -1
+  NMEAData pop();               // get an NMEAData struct from the stack and decreases the lastIndex
+  int getIndex();               // returns the position of the next free postion in the stack
+
+  private:
+  NMEAData stack[STACKSIZE]; // the array containg the structs
+  int lastIndex;    // an index pointng to the first free psotiion in the stack
+ };
+ 
+  NMEAStack::NMEAStack()
+  {
+    lastIndex = 0;
+  }
+  
+  int NMEAStack::push( NMEAData _nmea )
+  {
+    if( lastIndex < STACKSIZE )
+    {
+ /*     for(int i=0; i<MAX_NMEA_FIELDS; i++ )
+      {
+        stack[ lastIndex ].fields[i] = _nmea.fields[i];
+      }
+      stack[ lastIndex ].nrOfFields = _nmea.nrOfFields;
+      stack[ lastIndex ].sentence = _nmea.sentence;
+      */
+      stack[ lastIndex ] = _nmea;
+      return ++lastIndex;
+    } else
+    {
+      lastIndex = STACKSIZE;
+      return -1;    // of stack is full
+    }
+  }
+
+  NMEAData NMEAStack::pop()
+  {
+    NMEAData nmeaOut;
+    nmeaOut.sentence = "";
+    if( lastIndex>0)
+    {
+      lastIndex--;
+ /*     
+  *      for( int i=0; i<MAX_NMEA_FIELDS; i++ )
+      {
+        nmeaOut.fields[i] = stack[lastIndex].fields[i];
+      }
+      nmeaOut.nrOfFields = stack[lastIndex].nrOfFields;
+      nmeaOut.sentence = stack[lastIndex].sentence;
+*/
+      nmeaOut=stack[ lastIndex ];
+    }
+    
+    return nmeaOut;   
+  }
+
+  int NMEAStack::getIndex()
+  {
+    return lastIndex;
+  }
+ 
 
 /*****************************************************************************************
   Define the NMEAtor Class as type TriggeredTask
@@ -297,17 +375,20 @@ void NMEADebugger::debugWrite(float debugValue, int decimals = 2)
 class NMEAtor : public TriggeredTask
 {
   public:
-    NMEAtor(long int _rate, NMEADebugger *_ptrDebugger);
+    NMEAtor(uint32_t _rate, NMEADebugger *_ptrDebugger, NMEAStack *_ptrNMEAStack);
     virtual void run(uint32_t now);
-    String nmeaSentence = "";
+    void setSentence( String _nmeaSentence);
     void parseNMEA(String nmeaIn ); // parse an NMEA sentence with each part stored in the array
-
+    NMEAData getNMEAData(); // getter function to get the NMEADAta struct
+    
   private:
     uint32_t rate;
     NMEADebugger *ptrDebugger;
+    NMEAStack *ptrNMEAStack;
     MPU9250 mpu9250;
     String NMEAFilter = NMEA_SPECIALTY;
     NMEAData nmeaData;  // self explaining
+    String nmeaSentence = "";
 
     String checksum( String str ); //calculate the checksum for str
     String nmeaSpecialty( NMEAData nmeaIn ); // special treatment function
@@ -317,9 +398,11 @@ class NMEAtor : public TriggeredTask
 // *** NMEAtor Constructor
 // *** input parameters:
 // *** reference to the debugger object
-NMEAtor::NMEAtor(long int _rate, NMEADebugger *_ptrDebugger)
+NMEAtor::NMEAtor(uint32_t _rate, NMEADebugger *_ptrDebugger, NMEAStack *_ptrNMEAStack)
   : TriggeredTask(),
-    ptrDebugger(_ptrDebugger)
+    rate( _rate),
+    ptrDebugger(_ptrDebugger),
+    ptrNMEAStack(_ptrNMEAStack)
 {
   Wire.begin();
 
@@ -345,9 +428,8 @@ void NMEAtor::run(uint32_t now)
 
 
 #ifdef DEBUG
-  ptrDebugger->debugWrite("-----New NMEA Data processed on serial port 1-----");
-  ptrDebugger->debugWrite( nmeaSentence);
-#endif
+  ptrDebugger->debugWrite("-----End Data processed on serial port 1-----");
+  #endif
 
 
   // ***
@@ -360,7 +442,10 @@ void NMEAtor::run(uint32_t now)
   resetRunnable();
 }
 
-
+void NMEAtor::setSentence( String _nmeaSentence)
+{
+  nmeaSentence = _nmeaSentence;
+}
 
 /*
 
@@ -368,6 +453,11 @@ void NMEAtor::run(uint32_t now)
 String NMEAtor::nmeaSpecialty( NMEAData nmeaIn )
 {
   String filter = NMEA_SPECIALTY;
+  String sentence = nmeaIn.sentence;
+  String newSentence ="";
+  #ifdef TEST
+  ptrDebugger->debugWrite( " Specialty found... for filter"+filter);
+  #endif
   if ( filter.indexOf( nmeaIn.fields[0]) > -1 )
   {
     /* In my on-board Robertson data network some sentences
@@ -376,30 +466,47 @@ String NMEAtor::nmeaSpecialty( NMEAData nmeaIn )
     */
     //*** $IIDBK is not NMEA0183 compliant and needs conversion
     if ( nmeaIn.fields[0] == _DBK ) {
+      #ifdef TEST
+      ptrDebugger->debugWrite("Found "+String(_DBK));
+      #endif
       // a typical non standard DBK message I receive is
       // $IIDBK,A,0017.6,f,,,,
       // Char A can also be a V if invalid and shoul be removed
-      // together with the , that follows
-      (nmeaIn.sentence).remove(7, 2); // Remove A or V and , cgar from string;
-      // so now we have $IIDBK,0017.6,f,,,,
-      int f = (nmeaIn.sentence).indexOf( 'f' ); // check if sentence is in feet
-      if ( f) {
-        // right trim the remaining comma's
-        nmeaIn.sentence = (nmeaIn.sentence).substring( 0, f ); // trim remaining chars
-        // so now we have $IIDBK,0017.6,f
-        // and we need the the feet  to convert to meters
-        int v = (nmeaIn.sentence).indexOf(',') + 1;
-        float ft = ((nmeaIn.sentence).substring( v, (f - v - 2) )).toFloat();
-        nmeaIn.sentence += "," + String( ft * FTM, 1) + ",M,,";
-        nmeaIn.sentence += checksum( nmeaIn.sentence );
+      // All fields after the tag shift 1 position to the left
+      for( int i=1; i<nmeaIn.nrOfFields-2; i++ )
+      {
+        nmeaIn.fields[i] = nmeaIn.fields[i+1];
       }
-      return nmeaIn.sentence;
+      // We need the the feet  to convert to meters and add to string
+      float ft = nmeaIn.fields[1].toFloat();
+      nmeaIn.fields[3] = String( ft * FTM, 1);
+      nmeaIn.fields[4] = "M";
+      nmeaIn.fields[5] = "";
+      nmeaIn.fields[6] = "";
+
+      for( int i=0; i< nmeaIn.nrOfFields -1; i++)
+      {
+        #ifdef TEST
+        ptrDebugger->debugWrite("Field["+String(i)+"] = "+nmeaIn.fields[i]);
+        #endif
+        if(i>0) newSentence+=",";
+        newSentence += nmeaIn.fields[i];
+      }
+      newSentence += ",*"+checksum( newSentence );
+
+      #ifdef TEST
+      ptrDebugger->debugWrite( " Modified to:"+newSentence);
+      #endif
+      return newSentence;
     }
     //*** current $IIHDG,$IIHDM & $IIVHW sentences are causing issues in my navigational app
     //*** so its been filtered out here
     if ( nmeaIn.fields[0] == _HDM || nmeaIn.fields[0] == _HDG || nmeaIn.fields[0] == _VHW) {
-      nmeaIn.sentence = "";
-      return nmeaIn.sentence;
+      #ifdef TEST
+      ptrDebugger->debugWrite("Found "+nmeaIn.fields[0]);
+      #endif
+      newSentence = "";
+      return newSentence;
     }
 
   }
@@ -430,35 +537,72 @@ String NMEAtor::checksum( String str )
 void NMEAtor::parseNMEA(String nmeaStr)
 {
   nmeaData.nrOfFields = 0;
-  byte currentIndex = 0;
-  byte lastIndex = currentIndex;
-  byte sentenceLength = nmeaStr.length();
+  nmeaData.sentence="";
+  for(int i=0; i<MAX_NMEA_FIELDS; i++)
+  {
+    nmeaData.fields[i]="";
+  }
+  int currentIndex = 0;
+  int lastIndex = -1;
+  int sentenceLength = nmeaStr.length();
   String newSentence = "";  // used to construct the new senctence
   //*** check for a valid NMEA sentence
   if ( nmeaStr[0] == '$' || nmeaStr[0] == '!' )
   {
+    #ifdef TEST
+    ptrDebugger->debugWrite(" In te loop to parse for "+String(sentenceLength)+" chars");
+    #endif
     //*** parse the fields from the NMEA string
     //*** keeping in mind that indeOf() can return -1 if not found!
-    while ( (currentIndex = nmeaStr.indexOf( ',', lastIndex)) > 0 )
+    currentIndex = nmeaStr.indexOf( ',',0);
+    while ( lastIndex < sentenceLength  )
     {
+      
       //*** remember to sepatrate fields with the ',' character
       //*** but do not end with one!
-      if ( lastIndex ) newSentence += ',';
+      if ( lastIndex>0 ) newSentence += ',';
 
       //*** we want the data without the ',' in fields array
-      nmeaData.fields[ nmeaData.nrOfFields ] = nmeaStr.substring(lastIndex, currentIndex - 1);
-      newSentence += nmeaData.fields[ nmeaData.nrOfFields++];
-      lastIndex = currentIndex + 1; // searching from next char of ',' !
+      if( currentIndex-lastIndex >1 ) // check for an empty field
+      {
+        nmeaData.fields[ nmeaData.nrOfFields ] = nmeaStr.substring(lastIndex+1, currentIndex );
+        newSentence += nmeaData.fields[ nmeaData.nrOfFields];
+      } else nmeaData.fields[ nmeaData.nrOfFields ] = "0";
+      nmeaData.nrOfFields++;
+      lastIndex = currentIndex; // searching from next char of ',' !
+      currentIndex = nmeaStr.indexOf( ',', lastIndex+1);
+      //*** check if we found the last seperator
+      if( currentIndex < 0 )
+      {
+        //*** and make sure we parse the last part of the string too!
+        currentIndex = sentenceLength;
+      }
+      
     }
     if ( NMEAFilter.indexOf( nmeaData.fields[0] ) > -1)
     {
       newSentence = nmeaSpecialty( nmeaData );
-    } else newSentence += checksum( newSentence);
+    } else if(newSentence.indexOf('*')<1)  //Check for checksum in sentence
+    {
+      newSentence += ",*"+checksum( newSentence);
+    }
     nmeaData.sentence = newSentence;
-
+    #ifdef DEBUG
+    ptrDebugger->debugWrite( "new sentence is: ");
+    ptrDebugger->debugWrite(nmeaData.sentence );
+    #endif
+    ptrNMEAStack->push( nmeaData );   //push the struct to the stack for later use; i.e. buffer it
   }
 
   return;
+}
+
+/*
+ * getter function to get the NMEADAta structure
+ */
+NMEAData NMEAtor::getNMEAData()
+{
+  return nmeaData;
 }
 
 /*****************************************************************************************
@@ -566,7 +710,7 @@ MPU::MPU(NMEADebugger *_ptrDebugger)
     ptrDebugger->debugWrite(String(c, HEX));
 
     ptrDebugger->debugWrite("Waiting for ever.... or restart");
-    while (1) ; // Loop forever if communication doesn't happen
+    //while (1) ; // Loop forever if communication doesn't happen
   }
 
 }
@@ -685,16 +829,79 @@ void MPU::run(uint32_t now)
   resetRunnable();
 }
 
-/***********************************************************************************
-   Global variables go here
-*/
-
-NMEADebugger    debugger;
-MPU             mpu(&debugger);
-NMEAtor         nmeator( 4800, &debugger);
 
 
 
+#ifdef TEST
+class SoftGenerator : public TimedTask
+{
+  public:
+  SoftGenerator( uint32_t _pin, uint32_t _rate, NMEADebugger *_ptrDebugger, NMEAtor *_ptrNMEAtor);
+  virtual void run( uint32_t now);
+
+  private:
+  uint32_t pin;
+  uint32_t rate;
+  bool on;
+  NMEADebugger *ptrDebugger;
+  NMEAtor *ptrNMEAtor;
+  int index;
+  
+  String nmeaStream[10] ={
+    "$IIVWR,151,R,02.4,N,,,,",
+    "!AIVDM,1,1,,B,E>jMjb1WT;9h19Q00000000000006jDo>k9<0D2RRSv000,4*30",
+    "!AIVDM,1,1,,A,13aL<mhP000J9:PN?<jf4?vLP88B,0*2B",
+    "$IIDBK,A,0014.4,f,,,,",
+    "$GPGGA,151314.000,5251.3091,N,00541.8037,E,2,8,1.09,1.6,M,46.8,M,0000,0000*55",
+    "$GPGLL,5251.3091,N,00541.8037,E,151314.000,A,D*5B",
+    "$GPRMC,151314.000,A,5251.3091,N,00541.8037,E,0.09,0.00,070520,,,D*65",
+    "$PSTOB,13.0,v",
+    "$IIVWR,151,R,02.3,N,,,,",
+    "$IIVHW,,,000,M,01.57,N,,"
+    };
+
+ 
+};
+
+SoftGenerator::SoftGenerator( uint32_t _pin, uint32_t _rate, NMEADebugger *_ptrDebugger, NMEAtor *_ptrNMEAtor)
+      : TimedTask(millis()),
+      pin( _pin ),
+      rate(_rate),
+      on(false),
+      ptrDebugger(_ptrDebugger),
+      ptrNMEAtor(_ptrNMEAtor)
+      {
+        pinMode( 13, OUTPUT );
+
+        index = 0;
+      }
+
+void SoftGenerator::run( uint32_t now ){
+  if (on) {
+    digitalWrite(pin, LOW);
+    on = false;
+    ptrDebugger->debugWrite("BLINKER: OFF");
+    // If the LED is off, turn it on and remember the state.
+  } else {
+    digitalWrite(pin, HIGH);
+    on = true;
+    //Send output to Serial Monitor via debugger
+    ptrDebugger->debugWrite("BLINKER: ON");
+  }
+
+  if(index < 10){
+    ptrNMEAtor->setSentence(nmeaStream[index++]);
+   } else index=0;
+   ptrNMEAtor->setRunnable();
+    
+        // Run again in the specified number of milliseconds.
+  incRunTime(rate);
+  
+  
+}
+
+
+#endif
 void setup() {
   // put your setup code here, to run once:
 
@@ -702,15 +909,25 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
-  /*NMEADebugger    debugger;
-    MPU             mpu(&debugger);
-    NMEAtor         nmeator(&debugger);
-  */
+/***********************************************************************************
+   Global variables go here
+*/
+
+NMEAStack       NmeaStack;
+
+NMEADebugger    Debugger;
+//MPU             Mpu(&Debugger);
+NMEAtor         Nmeator( 4800, &Debugger, &NmeaStack);
+SoftGenerator TestNMEA( 13, 100, &Debugger, &Nmeator);
+
   Task *tasks[] = {
 
-    &debugger,
-    &mpu,
-    &nmeator
+    &Debugger,
+//    &Mpu,
+    &Nmeator
+    #ifdef TEST
+    ,&TestNMEA
+    #endif
   };
 
   // ***
@@ -729,32 +946,36 @@ void loop() {
    routine is run between each time loop() runs, so using delay inside loop can
    delay response. Multiple bytes of data may be available.
 */
+
+/*
 void serialEvent() {
   if (Serial.available()) {
 
-    mpu.setRunnable();
+    Mpu.setRunnable();
   }
 
 }
-
+*/
 /*
    SerialEvet1 is linked to RX1 to read NMEA data
    SerialEvent1 occurs whenever a new data comes in the hardware serial RX1. This
    routine is run between each time loop() runs, so using delay inside loop can
    delay response. Multiple bytes of data may be available.
 */
+/*
 void serialEvent1() {
   while (Serial1.available()) {
     // get the new byte:
     char inChar = (char)Serial1.read();
     // add it to the inputString:
-    nmeator.nmeaSentence += inChar;
+    Nmeator.nmeaSentence += inChar;
     // if the incoming character is a newline, set a flag so the main loop can
     // do something about it:
     if (inChar == '\n') {
       //stringComplete = true;
-      nmeator.setRunnable();
+      Nmeator.setRunnable();
     }
   }
 
 }
+*/
