@@ -1,0 +1,332 @@
+16:53:31.587 -> BLINKER: ON
+16:53:31.620 -> -----Raw NMEA Data received on serial port 1-----
+16:53:31.726 -> $IIVWR,151,R,02.4,N,,,,
+16:53:31.793 ->  In te loop to parse for 23 chars
+16:53:31.859 -> new sentence is: 
+16:53:31.893 -> $IIVWR,151,R,02.4,N,,,,*4e
+16:53:31.961 -> -----End Data processed on serial port 1-----
+16:53:32.063 -> BLINKER: OFF
+16:53:32.101 -> -----Raw NMEA Data received on serial port 1-----
+16:53:32.205 -> !AIVDM,1,1,,B,E>jMjb1WT;9h19Q00000000000006jDo>k9<0D2RRSv000,4*30
+16:53:32.343 ->  In te loop to parse for 65 chars
+16:53:32.410 -> new sentence is: 
+16:53:32.443 -> !AIVDM,1,1,,B,E>jMjb1WT;9h19Q00000000000006jDo>k9<0D2RRSv000,4*30
+16:53:32.580 -> -----End Data processed on serial port 1-----
+16:53:32.682 -> BLINKER: ON
+16:53:32.716 -> -----Raw NMEA Data received on serial port 1-----
+16:53:32.818 -> !AIVDM,1,1,,A,13aL<mhP000J9:PN?<jf4?vLP88B,0*2B
+16:53:32.922 ->  In te loop to parse for 47 chars
+16:53:32.989 -> new sentence is: 
+16:53:33.023 -> !AIVDM,1,1,,A,13aL<mhP000J9:PN?<jf4?vLP88B,0*2B
+16:53:33.126 -> -----End Data processed on serial port 1-----
+16:53:33.229 -> BLINKER: OFF
+16:53:33.262 -> -----Raw NMEA Data received on serial port 1-----
+16:53:33.362 -> $IIDBK,A,0014.4,f,,,,
+16:53:33.430 ->  In te loop to parse for 21 chars
+16:53:33.497 ->  Specialty found... for filter$IIDBK$PSTOB
+16:53:33.598 -> Found $IIDBK
+16:53:33.631 -> Field[0] = $AODBK
+16:53:33.665 -> Field[1] = 0014.4
+16:53:33.699 -> Field[2] = f
+16:53:33.736 -> Field[3] = 4.4
+16:53:33.771 -> Field[4] = M
+16:53:33.808 -> Field[5] = 
+16:53:33.808 -> Field[6] = 
+16:53:33.841 ->  Modified to:$AODBK,0014.4,f,4.4,M,,,**75
+16:53:33.942 -> new sentence is: 
+16:53:33.976 -> $AODBK,0014.4,f,4.4,M,,,**75
+16:53:34.042 -> -----End Data processed on serial port 1-----
+16:53:34.145 -> BLINKER: ON
+16:53:34.179 -> -----Raw NMEA Data received on serial port 1-----
+16:53:34.279 -> $GPGGA,151314.000,5251.3091,N,00541.8037,E,2,8,1.09,1.6,M,46.8,M,0000,0000*55
+16:53:34.454 ->  In te loop to parse for 77 chars
+16:53:34.522 -> new sentence is: 
+16:53:34.556 -> $GPGGA,151314.000,5251.3091,N,00541.8037,E,2,8,1.09,1.6,M,46.8,M,0000,0000*55
+16:53:34.725 -> -----End Data processed on serial port 1-----
+16:53:34.830 -> BLINKER: OFF
+16:53:34.830 -> -----Raw NMEA Data received on serial port 1-----
+16:53:34.933 -> $GPGLL,5251.3091,N,00541.8037,E,151314.000,A,D*5B
+16:53:35.071 ->  In te loop to parse for 49 chars
+16:53:35.139 -> new sentence is: 
+16:53:35.172 -> $GPGLL,5251.3091,N,00541.8037,E,151314.000,A,D*5B
+16:53:35.277 -> -----End Data processed on serial port 1-----
+16:53:35.377 -> BLINKER: ON
+16:53:35.410 -> -----Raw NMEA Data received on serial port 1-----
+16:53:35.514 -> $GPRMC,151314.000,A,5251.3091,N,00541.8037,E,0.09,0.00,070520,,,D*65
+16:53:35.659 ->  In te loop to parse for 68 chars
+16:53:35.730 -> new sentence is: 
+16:53:35.763 -> $GPRMC,151314.000,A,5251.3091,N,00541.8037,E,0.09,0.00,070520,,,D*65
+16:53:35.905 -> -----End Data processed on serial port 1-----
+16:53:36.006 -> BLINKER: OFF
+16:53:36.044 -> -----Raw NMEA Data received on serial port 1-----
+16:53:36.145 -> $PSTOB,13.0,v
+16:53:36.178 ->  In te loop to parse for 13 chars
+16:53:36.247 ->  Specialty found... for filter$IIDBK$PSTOB
+16:53:36.347 -> Field[0] = $AOXDR
+16:53:36.381 -> Field[1] = U
+16:53:36.414 -> Field[2] = 13.0
+16:53:36.448 -> Field[3] = V
+16:53:36.482 -> new sentence is: 
+16:53:36.515 -> $AOXDR,U,13.0,V*25
+16:53:36.582 -> -----End Data processed on serial port 1-----
+16:53:36.650 -> BLINKER: ON
+16:53:36.726 -> -----Raw NMEA Data received on serial port 1-----
+16:53:36.793 -> $IIVWR,151,R,02.3,N,,,,
+16:53:36.861 ->  In te loop to parse for 23 chars
+16:53:36.929 -> new sentence is: 
+16:53:36.963 -> $IIVWR,151,R,02.3,N,,,,*49
+16:53:37.035 -> -----End Data processed on serial port 1-----
+16:53:37.106 -> BLINKER: OFF
+16:53:37.140 -> -----Raw NMEA Data received on serial port 1-----
+16:53:37.242 -> $IIVHW,,,000,M,01.57,N,,
+16:53:37.309 ->  In te loop to parse for 24 chars
+16:53:37.375 -> new sentence is: 
+16:53:37.442 -> $IIVHW,,,000,M,01.57,N,,*7b
+16:53:37.475 -> -----End Data processed on serial port 1-----
+16:53:37.582 -> BLINKER: ON
+16:53:37.615 -> -----Raw NMEA Data received on serial port 1-----
+16:53:37.716 -> $IIVHW,,,000,M,01.57,N,,
+16:53:37.785 ->  In te loop to parse for 24 chars
+16:53:37.853 -> new sentence is: 
+16:53:37.890 -> $IIVHW,,,000,M,01.57,N,,*7b
+16:53:37.960 -> -----End Data processed on serial port 1-----
+16:53:38.066 -> BLINKER: OFF
+16:53:38.066 -> -----Raw NMEA Data received on serial port 1-----
+16:53:38.201 -> $IIVWR,151,R,02.4,N,,,,
+16:53:38.234 ->  In te loop to parse for 23 chars
+16:53:38.302 -> new sentence is: 
+16:53:38.339 -> $IIVWR,151,R,02.4,N,,,,*4e
+16:53:38.407 -> -----End Data processed on serial port 1-----
+16:53:38.507 -> BLINKER: ON
+16:53:38.540 -> -----Raw NMEA Data received on serial port 1-----
+16:53:38.642 -> !AIVDM,1,1,,B,E>jMjb1WT;9h19Q00000000000006jDo>k9<0D2RRSv000,4*30
+16:53:38.778 ->  In te loop to parse for 65 chars
+16:53:38.845 -> new sentence is: 
+16:53:38.912 -> !AIVDM,1,1,,B,E>jMjb1WT;9h19Q00000000000006jDo>k9<0D2RRSv000,4*30
+16:53:39.045 -> -----End Data processed on serial port 1-----
+16:53:39.149 -> BLINKER: OFF
+16:53:39.149 -> -----Raw NMEA Data received on serial port 1-----
+16:53:39.290 -> !AIVDM,1,1,,A,13aL<mhP000J9:PN?<jf4?vLP88B,0*2B
+16:53:39.358 ->  In te loop to parse for 47 chars
+16:53:39.458 -> new sentence is: 
+16:53:39.492 -> !AIVDM,1,1,,A,13aL<mhP000J9:PN?<jf4?vLP88B,0*2B
+16:53:39.594 -> -----End Data processed on serial port 1-----
+16:53:39.695 -> BLINKER: ON
+16:53:39.729 -> -----Raw NMEA Data received on serial port 1-----
+16:53:39.832 -> $IIDBK,A,0014.4,f,,,,
+16:53:39.865 ->  In te loop to parse for 21 chars
+16:53:39.932 ->  Specialty found... for filter$IIDBK$PSTOB
+16:53:40.039 -> Found $IIDBK
+16:53:40.075 -> Field[0] = $AODBK
+16:53:40.108 -> Field[1] = 0014.4
+16:53:40.142 -> Field[2] = f
+16:53:40.175 -> Field[3] = 4.4
+16:53:40.210 -> Field[4] = M
+16:53:40.243 -> Field[5] = 
+16:53:40.276 -> Field[6] = 
+16:53:40.310 ->  Modified to:$AODBK,0014.4,f,4.4,M,,,**75
+16:53:40.377 -> new sentence is: 
+16:53:40.411 -> $AODBK,0014.4,f,4.4,M,,,**75
+16:53:40.482 -> -----End Data processed on serial port 1-----
+16:53:40.583 -> BLINKER: OFF
+16:53:40.618 -> -----Raw NMEA Data received on serial port 1-----
+16:53:40.720 -> $GPGGA,151314.000,5251.3091,N,00541.8037,E,2,8,1.09,1.6,M,46.8,M,0000,0000*55
+16:53:40.886 ->  In te loop to parse for 77 chars
+16:53:40.954 -> new sentence is: 
+16:53:40.991 -> $GPGGA,151314.000,5251.3091,N,00541.8037,E,2,8,1.09,1.6,M,46.8,M,0000,0000*55
+16:53:41.160 -> -----End Data processed on serial port 1-----
+16:53:41.261 -> BLINKER: ON
+16:53:41.295 -> -----Raw NMEA Data received on serial port 1-----
+16:53:41.398 -> $GPGLL,5251.3091,N,00541.8037,E,151314.000,A,D*5B
+16:53:41.499 ->  In te loop to parse for 49 chars
+16:53:41.567 -> new sentence is: 
+16:53:41.635 -> $GPGLL,5251.3091,N,00541.8037,E,151314.000,A,D*5B
+16:53:41.735 -> -----End Data processed on serial port 1-----
+16:53:41.837 -> BLINKER: OFF
+16:53:41.870 -> -----Raw NMEA Data received on serial port 1-----
+16:53:41.970 -> $GPRMC,151314.000,A,5251.3091,N,00541.8037,E,0.09,0.00,070520,,,D*65
+16:53:42.109 ->  In te loop to parse for 68 chars
+16:53:42.176 -> new sentence is: 
+16:53:42.210 -> $GPRMC,151314.000,A,5251.3091,N,00541.8037,E,0.09,0.00,070520,,,D*65
+16:53:42.378 -> -----End Data processed on serial port 1-----
+16:53:42.483 -> BLINKER: ON
+16:53:42.483 -> -----Raw NMEA Data received on serial port 1-----
+16:53:42.618 -> $PSTOB,13.0,v
+16:53:42.652 ->  In te loop to parse for 13 chars
+16:53:42.720 ->  Specialty found... for filter$IIDBK$PSTOB
+16:53:42.787 -> Field[0] = $AOXDR
+16:53:42.855 -> Field[1] = U
+16:53:42.855 -> Field[2] = 13.0
+16:53:42.922 -> Field[3] = V
+16:53:42.922 -> new sentence is: 
+16:53:42.958 -> $AOXDR,U,13.0,V*25
+16:53:43.028 -> -----End Data processed on serial port 1-----
+16:53:43.128 -> BLINKER: OFF
+16:53:43.128 -> -----Raw NMEA Data received on serial port 1-----
+16:53:43.268 -> $IIVWR,151,R,02.3,N,,,,
+16:53:43.302 ->  In te loop to parse for 23 chars
+16:53:43.368 -> new sentence is: 
+16:53:43.402 -> $IIVWR,151,R,02.3,N,,,,*49
+16:53:43.469 -> -----End Data processed on serial port 1-----
+16:53:43.570 -> BLINKER: ON
+16:53:43.603 -> -----Raw NMEA Data received on serial port 1-----
+16:53:43.705 -> $IIVHW,,,000,M,01.57,N,,
+16:53:43.772 ->  In te loop to parse for 24 chars
+16:53:43.840 -> new sentence is: 
+16:53:43.876 -> $IIVHW,,,000,M,01.57,N,,*7b
+16:53:43.944 -> -----End Data processed on serial port 1-----
+16:53:44.044 -> BLINKER: OFF
+16:53:44.078 -> -----Raw NMEA Data received on serial port 1-----
+16:53:44.184 -> $IIVHW,,,000,M,01.57,N,,
+16:53:44.217 ->  In te loop to parse for 24 chars
+16:53:44.318 -> new sentence is: 
+16:53:44.351 -> $IIVHW,,,000,M,01.57,N,,*7b
+16:53:44.388 -> -----End Data processed on serial port 1-----
+16:53:44.489 -> BLINKER: ON
+16:53:44.526 -> -----Raw NMEA Data received on serial port 1-----
+16:53:44.631 -> $IIVWR,151,R,02.4,N,,,,
+16:53:44.700 ->  In te loop to parse for 23 chars
+16:53:44.768 -> new sentence is: 
+16:53:44.805 -> $IIVWR,151,R,02.4,N,,,,*4e
+16:53:44.872 -> -----End Data processed on serial port 1-----
+16:53:44.972 -> BLINKER: OFF
+16:53:44.972 -> -----Raw NMEA Data received on serial port 1-----
+16:53:45.111 -> !AIVDM,1,1,,B,E>jMjb1WT;9h19Q00000000000006jDo>k9<0D2RRSv000,4*30
+16:53:45.247 ->  In te loop to parse for 65 chars
+16:53:45.315 -> new sentence is: 
+16:53:45.349 -> !AIVDM,1,1,,B,E>jMjb1WT;9h19Q00000000000006jDo>k9<0D2RRSv000,4*30
+16:53:45.485 -> -----End Data processed on serial port 1-----
+16:53:45.594 -> BLINKER: ON
+16:53:45.628 -> -----Raw NMEA Data received on serial port 1-----
+16:53:45.729 -> !AIVDM,1,1,,A,13aL<mhP000J9:PN?<jf4?vLP88B,0*2B
+16:53:45.831 ->  In te loop to parse for 47 chars
+16:53:45.898 -> new sentence is: 
+16:53:45.935 -> !AIVDM,1,1,,A,13aL<mhP000J9:PN?<jf4?vLP88B,0*2B
+16:53:46.037 -> -----End Data processed on serial port 1-----
+16:53:46.139 -> BLINKER: OFF
+16:53:46.172 -> -----Raw NMEA Data received on serial port 1-----
+16:53:46.273 -> $IIDBK,A,0014.4,f,,,,
+16:53:46.345 ->  In te loop to parse for 21 chars
+16:53:46.412 ->  Specialty found... for filter$IIDBK$PSTOB
+16:53:46.478 -> Found $IIDBK
+16:53:46.513 -> Field[0] = $AODBK
+16:53:46.547 -> Field[1] = 0014.4
+16:53:46.616 -> Field[2] = f
+16:53:46.616 -> Field[3] = 4.4
+16:53:46.649 -> Field[4] = M
+16:53:46.683 -> Field[5] = 
+16:53:46.716 -> Field[6] = 
+16:53:46.752 ->  Modified to:$AODBK,0014.4,f,4.4,M,,,**75
+16:53:46.853 -> new sentence is: 
+16:53:46.886 -> $AODBK,0014.4,f,4.4,M,,,**75
+16:53:46.954 -> -----End Data processed on serial port 1-----
+16:53:47.025 -> BLINKER: ON
+16:53:47.063 -> -----Raw NMEA Data received on serial port 1-----
+16:53:47.166 -> $GPGGA,151314.000,5251.3091,N,00541.8037,E,2,8,1.09,1.6,M,46.8,M,0000,0000*55
+16:53:47.335 ->  In te loop to parse for 77 chars
+16:53:47.402 -> new sentence is: 
+16:53:47.435 -> $GPGGA,151314.000,5251.3091,N,00541.8037,E,2,8,1.09,1.6,M,46.8,M,0000,0000*55
+16:53:47.605 -> -----End Data processed on serial port 1-----
+16:53:47.705 -> BLINKER: OFF
+16:53:47.740 -> -----Raw NMEA Data received on serial port 1-----
+16:53:47.844 -> $GPGLL,5251.3091,N,00541.8037,E,151314.000,A,D*5B
+16:53:47.945 ->  In te loop to parse for 49 chars
+16:53:48.050 -> new sentence is: 
+16:53:48.084 -> $GPGLL,5251.3091,N,00541.8037,E,151314.000,A,D*5B
+16:53:48.185 -> -----End Data processed on serial port 1-----
+16:53:48.287 -> BLINKER: ON
+16:53:48.320 -> -----Raw NMEA Data received on serial port 1-----
+16:53:48.428 -> $GPRMC,151314.000,A,5251.3091,N,00541.8037,E,0.09,0.00,070520,,,D*65
+16:53:48.571 ->  In te loop to parse for 68 chars
+16:53:48.638 -> new sentence is: 
+16:53:48.672 -> $GPRMC,151314.000,A,5251.3091,N,00541.8037,E,0.09,0.00,070520,,,D*65
+16:53:48.807 -> -----End Data processed on serial port 1-----
+16:53:48.907 -> BLINKER: OFF
+16:53:48.941 -> -----Raw NMEA Data received on serial port 1-----
+16:53:49.044 -> $PSTOB,13.0,v
+16:53:49.078 ->  In te loop to parse for 13 chars
+16:53:49.145 ->  Specialty found... for filter$IIDBK$PSTOB
+16:53:49.247 -> Field[0] = $AOXDR
+16:53:49.281 -> Field[1] = U
+16:53:49.314 -> Field[2] = 13.0
+16:53:49.348 -> Field[3] = V
+16:53:49.381 -> new sentence is: 
+16:53:49.415 -> $AOXDR,U,13.0,V*25
+16:53:49.484 -> -----End Data processed on serial port 1-----
+16:53:49.584 -> BLINKER: ON
+16:53:49.584 -> -----Raw NMEA Data received on serial port 1-----
+16:53:49.718 -> $IIVWR,151,R,02.3,N,,,,
+16:53:49.751 ->  In te loop to parse for 23 chars
+16:53:49.819 -> new sentence is: 
+16:53:49.853 -> $IIVWR,151,R,02.3,N,,,,*49
+16:53:49.920 -> -----End Data processed on serial port 1-----
+16:53:50.022 -> BLINKER: OFF
+16:53:50.059 -> -----Raw NMEA Data received on serial port 1-----
+16:53:50.163 -> $IIVHW,,,000,M,01.57,N,,
+16:53:50.231 ->  In te loop to parse for 24 chars
+16:53:50.300 -> new sentence is: 
+16:53:50.335 -> $IIVHW,,,000,M,01.57,N,,*7b
+16:53:50.404 -> -----End Data processed on serial port 1-----
+16:53:50.505 -> BLINKER: ON
+16:53:50.505 -> -----Raw NMEA Data received on serial port 1-----
+16:53:50.611 -> $IIVHW,,,000,M,01.57,N,,
+16:53:50.681 ->  In te loop to parse for 24 chars
+16:53:50.748 -> new sentence is: 
+16:53:50.785 -> $IIVHW,,,000,M,01.57,N,,*7b
+16:53:50.852 -> -----End Data processed on serial port 1-----
+16:53:50.952 -> BLINKER: OFF
+16:53:50.986 -> -----Raw NMEA Data received on serial port 1-----
+16:53:51.090 -> $IIVWR,151,R,02.4,N,,,,
+16:53:51.125 ->  In te loop to parse for 23 chars
+16:53:51.225 -> new sentence is: 
+16:53:51.260 -> $IIVWR,151,R,02.4,N,,,,*4e
+16:53:51.297 -> -----End Data processed on serial port 1-----
+16:53:51.397 -> BLINKER: ON
+16:53:51.430 -> -----Raw NMEA Data received on serial port 1-----
+16:53:51.532 -> !AIVDM,1,1,,B,E>jMjb1WT;9h19Q00000000000006jDo>k9<0D2RRSv000,4*30
+16:53:51.701 ->  In te loop to parse for 65 chars
+16:53:51.769 -> new sentence is: 
+16:53:51.803 -> !AIVDM,1,1,,B,E>jMjb1WT;9h19Q00000000000006jDo>k9<0D2RRSv000,4*30
+16:53:51.937 -> -----End Data processed on serial port 1-----
+16:53:52.038 -> BLINKER: OFF
+16:53:52.072 -> -----Raw NMEA Data received on serial port 1-----
+16:53:52.173 -> !AIVDM,1,1,,A,13aL<mhP000J9:PN?<jf4?vLP88B,0*2B
+16:53:52.274 ->  In te loop to parse for 47 chars
+16:53:52.342 -> new sentence is: 
+16:53:52.409 -> !AIVDM,1,1,,A,13aL<mhP000J9:PN?<jf4?vLP88B,0*2B
+16:53:52.477 -> -----End Data processed on serial port 1-----
+16:53:52.584 -> BLINKER: ON
+16:53:52.617 -> -----Raw NMEA Data received on serial port 1-----
+16:53:52.718 -> $IIDBK,A,0014.4,f,,,,
+16:53:52.785 ->  In te loop to parse for 21 chars
+16:53:52.853 ->  Specialty found... for filter$IIDBK$PSTOB
+16:53:52.925 -> Found $IIDBK
+16:53:52.959 -> Field[0] = $AODBK
+16:53:53.029 -> Field[1] = 0014.4
+16:53:53.062 -> Field[2] = f
+16:53:53.062 -> Field[3] = 4.4
+16:53:53.097 -> Field[4] = M
+16:53:53.131 -> Field[5] = 
+16:53:53.165 -> Field[6] = 
+16:53:53.198 ->  Modified to:$AODBK,0014.4,f,4.4,M,,,**75
+16:53:53.298 -> new sentence is: 
+16:53:53.332 -> $AODBK,0014.4,f,4.4,M,,,**75
+16:53:53.400 -> -----End Data processed on serial port 1-----
+16:53:53.504 -> BLINKER: OFF
+16:53:53.504 -> -----Raw NMEA Data received on serial port 1-----
+16:53:53.642 -> $GPGGA,151314.000,5251.3091,N,00541.8037,E,2,8,1.09,1.6,M,46.8,M,0000,0000*55
+16:53:53.777 ->  In te loop to parse for 77 chars
+16:53:53.848 -> new sentence is: 
+16:53:53.916 -> $GPGGA,151314.000,5251.3091,N,00541.8037,E,2,8,1.09,1.6,M,46.8,M,0000,0000*55
+16:53:54.084 -> -----End Data processed on serial port 1-----
+16:53:54.152 -> BLINKER: ON
+16:53:54.186 -> -----Raw NMEA Data received on serial port 1-----
+16:53:54.288 -> $GPGLL,5251.3091,N,00541.8037,E,151314.000,A,D*5B
+16:53:54.424 ->  In te loop to parse for 49 chars
+16:53:54.491 -> new sentence is: 
+16:53:54.524 -> $GPGLL,5251.3091,N,00541.8037,E,151314.000,A,D*5B
+16:53:54.626 -> -----End Data processed on serial port 1-----
+16:53:54.726 -> BLINKER: OFF
+16:53:54.760 -> -----Raw NMEA Data received on serial port 1-----
+16:53:54.864 -> $GPRMC,151314.000,A,5251.3091,N,00541.8037,E,0.09,0.00,070520,,,D*65
+16:53:55.000 ->  In

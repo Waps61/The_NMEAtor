@@ -154,7 +154,7 @@
    add the their definitions to the NMEA_SPECIALTY definition
    The pre-compiler concatenates string literals by using "" in between
 */
-#define NMEA_SPECIALTY ""_HDM""_HDG""_DBK""_VHW
+#define NMEA_SPECIALTY ""_DBK""_TOB
 
 //*** Some conversion factors
 #define FTM  0.3048        // feet to meters
@@ -473,6 +473,8 @@ String NMEAtor::nmeaSpecialty( NMEAData nmeaIn )
       // $IIDBK,A,0017.6,f,,,,
       // Char A can also be a V if invalid and shoul be removed
       // All fields after the tag shift 1 position to the left
+      // Since we modify the sentence we'll also put our talker ID in place
+      nmeaIn.fields[0]="$AODBK";
       for( int i=1; i<nmeaIn.nrOfFields-2; i++ )
       {
         nmeaIn.fields[i] = nmeaIn.fields[i+1];
@@ -509,6 +511,30 @@ String NMEAtor::nmeaSpecialty( NMEAData nmeaIn )
       return newSentence;
     }
 
+    //*** current Battery info is in a non NMEA0183 format 
+    //*** i.e. $PSTOB,13.2,V
+    //*** will be converted to $AOXDR,U,13.2,V,BATT,*CS
+    if( nmeaIn.fields[0] == _TOB )
+    {
+      nmeaIn.nrOfFields =5;
+      nmeaIn.fields[0] = "$AOXDR";
+      //*** by working backwards we can shift some values to the right index
+      nmeaIn.fields[4] ="BATT";
+      nmeaIn.fields[3] = nmeaIn.fields[2]; // unit of measure
+      nmeaIn.fields[2] = nmeaIn.fields[1];  // the actual measurement value
+      nmeaIn.fields[1] ="U";  // the transducer unit
+      nmeaIn.fields[3].toUpperCase();
+      for( int i=0; i< nmeaIn.nrOfFields -1; i++)
+      {
+        #ifdef TEST
+        ptrDebugger->debugWrite("Field["+String(i)+"] = "+nmeaIn.fields[i]);
+        #endif
+        if(i>0) newSentence+=",";
+        newSentence += nmeaIn.fields[i];
+      }
+      newSentence += checksum( newSentence );
+
+    }
   }
 }
 
@@ -525,8 +551,8 @@ String NMEAtor::checksum( String str )
       cs ^= str[n];
     }
   }
-  if (cs < 0x10) return "0" + String(cs, HEX);
-  else return String(cs, HEX);
+  if (cs < 0x10) return "*0" + String(cs, HEX);
+  else return "*"+String(cs, HEX);
 
 
 }
@@ -584,7 +610,7 @@ void NMEAtor::parseNMEA(String nmeaStr)
       newSentence = nmeaSpecialty( nmeaData );
     } else if(newSentence.indexOf('*')<1)  //Check for checksum in sentence
     {
-      newSentence += ",*"+checksum( newSentence);
+      newSentence += checksum( newSentence);
     }
     nmeaData.sentence = newSentence;
     #ifdef DEBUG
