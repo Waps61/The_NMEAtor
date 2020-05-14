@@ -4,8 +4,9 @@
   URL:      https://www.hackster.io/waps61
   Date:     30-04-2020
   Last
-  Update:   10-05-2020
-  Achieved: NMEAParser is working correctly
+  Update:   14-05-2020
+  Achieved: NMEAParser is working correctly, MPU9250 working with
+            filtered heading data
   Purpose:  Build an NMEA0183 manupulator and animator for on board of my sailing boat
             supporting following types of tasks:
             - Reading NMEA0183 v1.5 data without a checksum,
@@ -33,7 +34,7 @@
 
 
   Hardware setup MPU9250:
-  MPU9250 Breakout --------- Arduino
+  MPU9250/6500 ------------- Arduino
   VCC ---------------------- 3.3V
   GND ---------------------- GND
   SDA ---------------------- SDA20
