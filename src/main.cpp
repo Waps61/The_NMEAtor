@@ -5,8 +5,11 @@
   URL:      https://www.hackster.io/waps61
   Date:     30-04-2020
   Last
-  Update:   23-05-2020
-  Achieved: Software is ready for pre-FAT on board, including touch menu
+  Update:   29-05-2020
+  Achieved: pre-FAT failed due to erroneous implementation of reading input and sending output.
+            Functions startListening and Start Talking are overhauled. Function decodeNMEAInput
+            added to test and process valid incomming NMEA data.
+            
   Purpose:  Build an NMEA0183 manupulator and animator for on board of my sailing boat
             supporting following types of tasks:
             - Reading NMEA0183 v1.5 data without a checksum,
@@ -44,7 +47,8 @@
   INT ---------------------- ?
  
   Serial is reserved for the MPU9250 communication
-        Serial1 is reserved for NMEA listener
+        Digital pin 53 (and 51) are reserved for the NMEA listener
+        via SoftSerial
         Serial2 is reserved for NMEA talker
   
   Hardware setup:
@@ -80,18 +84,25 @@ Arduino Mega2560    8       9       2       3       4       5       6       7
 *Remember to set the pins to suit your display module!
 
 
-  
+---------------
+Terms of use:
+---------------
+The software is provided "AS IS", without any warranty of any kind, express or implied,
+including but not limited to the warranties of mechantability, fitness for a particular
+purpose and noninfringement. In no event shall the authors or copyright holders be liable
+for any claim, damages or other liability, whether in an action of contract, tort or
+otherwise, arising from, out of or in connection with the software or the use or other
+dealings in the software.
+
+-----------
+Warning:
+-----------
+Do NOT use this compass in situations involving safety to life
+such as navigation at sea.  
         
-  TODO: 
+TODO: 
 
-   Credit:   Based on Alan Burlison's Task Scheduler Library
-              The following is Copyright Alan Burlison, 2011
-              Original Source Code:  http://bleaklow.com/files/2010/Task.tar.gz
-              Original Reference:   http://bleaklow.com/2010/07/20/a_very_simple_arduino_task_manager.html
-
-              Source: https://github.com/gadgetstogrow/TaskScheduler
-              Tutorial: https://www.hackster.io/GadgetsToGrow/don-t-delay-use-an-arduino-task-scheduler-today-215cfe
-
+Credit:   
 */
 
 /*
@@ -99,13 +110,18 @@ Arduino Mega2560    8       9       2       3       4       5       6       7
 */
 
 #include <Wire.h>
-#include <EEPROM.h>
-#include <MPU9250.h>  // MPU9250 from the MPU9250-master folder
+//#include <EEPROM.h>
+#include "quaternionFilters.h"
+#include <MPU9250.h>  
 
 #include <LCDWIKI_GUI.h>
 #include <LCDWIKI_KBV.h>
 #include <TouchScreen.h>
 
+//*** Since the signal from the RS422-TTL converter is inverted
+//*** a digital input is used as a software serial port because
+//*** it can invert te signal back to its orignal pulse set
+#include <SoftwareSerial.h>
 /*
    Definitions go here
 */
@@ -113,15 +129,16 @@ Arduino Mega2560    8       9       2       3       4       5       6       7
 // *** Conditional Debug & Test Info to Serial Monitor
 // *** by commenting out the line(s) below the debugger and or test statements will 
 // *** be ommitted from the code
-
 //#define DEBUG 1
-#define TEST 1
+//#define TEST 1
 #define DISPLAY_ATTACHED 1
+//#define MPU_ATTACHED 1
+
 #define SAMPLERATE 115200
 
 #define LISTENER_RATE 4800 // Baudrate for the listner
-#define LISTENER_PORT 1   // Serial port 1
-#define TALKER_RATE 38400 // Baudrate for the talker
+#define LISTENER_PORT 53   // SoftSerial port 
+#define TALKER_RATE 4800 // Baudrate for the talker
 #define TALKER_PORT 2   // Serial port 2
 
 
@@ -131,10 +148,16 @@ Arduino Mega2560    8       9       2       3       4       5       6       7
 #define NTK  1.852         // nautical mile to km
 #define KTN  0.5399569     // km to nautical mile
 
+//*** The NMEA defines in totl 82 characters including the starting 
+//*** characters $ or ! and the checksum character *, the checksum
+//*** AND last but not least the <CR><LF> chacters.
+//*** we define one more for the terminating '\0' character for char buffers
+#define NMEA_BUFFER_SIZE 83 // According NEA0183 specs the max char is 82
+#define NMEA_TERMINATOR "\r\n"
+
 //*** The maximum number of fields in an NMEA string
 //*** The number is based on the largest sentence MDA,
 //***  the Meteorological Composite sentence
-#define NMEA_BUFFER_SIZE 83 // According NEA0183 specs the max char is 82
 #define MAX_NMEA_FIELDS 21
 
 #define STACKSIZE 10  // Size of the stack; adjust according use
@@ -151,15 +174,15 @@ Arduino Mega2560    8       9       2       3       4       5       6       7
 #define _GGA "$GPGGA"   // GPS Fix Data. Time, Position and fix related data for a GPS receiver
 #define _GSA "$GPGSA"   // GPS DOP and active satellites
 #define _GSV "$GPGSV"   // Satellites in view
-#define _DBK "$IIDBK"   // Depth below keel
-#define _DBS "$IIDBS"   // Depth below surface
-#define _DBT "$IIDBT"   // Depth below transducer
+#define _DBK "$SDDBK"   // Depth below keel
+#define _DBS "$SDDBS"   // Depth below surface
+#define _DBT "$SDDBT"   // Depth below transducer
 #define _HDG "$IIHDG"   // Heading  Deviation & Variation
 #define _HDM "$IIHDM"   // Heading Magnetic
 #define _HDT "$IIHDT"  // Heading True
 #define _MWD "$IIMWD"  // Wind Direction & Speed
 #define _MTW "$IIMTW"  // Water Temperature
-#define _MWV "$IIMVW"  // Wind Speed and Angle
+#define _MWV "$WIMWV"  // Wind Speed and Angle
 #define _RMA "$GPRMA"  // Recommended Minimum Navigation Information
 #define _RMB "$GPRMB"  // Recommended Minimum Navigation Information
 #define _RMC "$GPRMC"  // Recommended Minimum Navigation Information
@@ -206,14 +229,28 @@ Arduino Mega2560    8       9       2       3       4       5       6       7
 */
 #define NMEA_SPECIALTY "" _DBK "" _TOB
 
+//*** A structure to hold the NMEA data
+typedef struct {
+  String fields[ MAX_NMEA_FIELDS ];
+  byte nrOfFields=0;
+  String sentence="";
+
+}NMEAData ;
+
+char nmeaBuffer[NMEA_BUFFER_SIZE]={0};
+
+enum NMEAReceiveStatus { INVALID, VALID, RECEIVING, CHECKSUMMING, TERMINATING, NMEA_READY};
+byte nmeaStatus = INVALID;
+byte nmeaIndex=0;
+bool nmeaDataReady = false;
+
+/* the below option false is tested with an NMEAsimulator via an USB to Serial hw 
+connection to the Arduino and is working in this setting.
+*/
+SoftwareSerial nmeaSerial(LISTENER_PORT,51, false);
 /*
 TFT screen specific definitions go here
 */
-//if the IC model is known or the modules is unreadable,you can use this constructed function
-LCDWIKI_KBV my_lcd(ILI9486,A3,A2,A1,A0,A4); //model,cs,cd,wr,rd,reset
-//if the IC model is not known and the modules is readable,you can use this constructed function
-//LCDWIKI_KBV my_lcd(320,480,A3,A2,A1,A0,A4);//width,height,cs,cd,wr,rd,reset
-
 #define YP A3  // must be an analog pin, use "An" notation!
 #define XM A2  // must be an analog pin, use "An" notation!
 #define YM 9   // can be a digital pin
@@ -240,9 +277,6 @@ LCDWIKI_KBV my_lcd(ILI9486,A3,A2,A1,A0,A4); //model,cs,cd,wr,rd,reset
 #define MINPRESSURE 10
 #define MAXPRESSURE 1000
 
-
-TouchScreen ts = TouchScreen(XP, YP, XM, YM, 300);
-
 #define BLACK        0x0000  /*   0,   0,   0 */
 #define BLUE         0x001F  /*   0,   0, 255 */
 #define RED          0xF800  /* 255,   0,   0 */
@@ -263,34 +297,47 @@ TouchScreen ts = TouchScreen(XP, YP, XM, YM, 300);
 #define GREENYELLOW  0xAFE5  /* 173, 255,  47 */
 #define LOG_COLOR    0xFD20
 
-
-int16_t current_color,flag_colour;
-boolean show_flag = true;
-int16_t screen_row = 0;
-
-
 #define BUTTON_H  60 //button height
 #define BUTTON_W  110 //button wodth
 #define BUTTON_X  5 // x position of button column
 #define  BUTTON_Y 260 // y position of button column
 
+//if the IC model is known or the modules is unreadable,you can use this constructed function
+LCDWIKI_KBV my_lcd(ILI9486,A3,A2,A1,A0,A4); //model,cs,cd,wr,rd,reset
+//if the IC model is not known and the modules is readable,you can use this constructed function
+//LCDWIKI_KBV my_lcd(320,480,A3,A2,A1,A0,A4);//width,height,cs,cd,wr,rd,reset
+
+TouchScreen ts = TouchScreen(XP, YP, XM, YM, 300);
+
+
+int16_t current_color,flag_colour;
+boolean show_flag = true;
+int16_t screen_row = 0;
+
+//*** Define the units of measurement in a string pointer array 
+//*** and use an enum to get the index for the specific label
 const char *screen_units[]={"Kts","NM","Deg","M","C","V"};
 enum units { SPEED, DIST, DEGR, MTRS, TEMP, VOLT};
-enum screean_quadrant { Q1, Q2, Q3, Q4 };
+//*** the screen is divided in 4 quadrants
+//***   Q1      Q2
+//***   Q3      Q4
+enum screen_quadrant { Q1, Q2, Q3, Q4 };
 
+//*** a structure to hold the button info
 typedef struct _button_info
 {
-     uint8_t button_name[10];
-     uint8_t button_name_size;
+     char button_name[10];
+     uint8_t button_name_size;    // the text size i.e. 1,2,...,n based on a 5x8 char
      uint16_t button_name_colour;
      uint16_t button_colour;
      uint16_t button_x;
      uint16_t button_y;     
  }button_info;
 
+//*** define the buttons used with an enumerated tag
 enum menu_buttons { SPD, CRS, ALL, LOG};
-uint8_t active_menu_button = CRS; //holds the active menu button pressed
-//the definition of buttons
+uint8_t active_menu_button = SPD; //holds the active menu button pressed
+//*** the definition of buttons menu
 button_info menu_button[4] = 
 {
   "Speed",3,BLACK,LIGHTGREY,BUTTON_X,BUTTON_Y,
@@ -298,28 +345,34 @@ button_info menu_button[4] =
   "All",3,BLACK,LIGHTGREY,BUTTON_X+(2*(BUTTON_W+BUTTON_X)),BUTTON_Y,
   "Log",3,BLACK,LIGHTGREY,BUTTON_X+(3*(BUTTON_W+BUTTON_X)),BUTTON_Y, 
 };
-void show_string(uint8_t *str,int16_t x,int16_t y,uint8_t csize,uint16_t fc, uint16_t bc,boolean mode)
+
+/* 
+  puts a string in a foreground/background color on position x,y
+*/
+void show_string(char *str,int16_t x,int16_t y,uint8_t csize,uint16_t fc, uint16_t bc,boolean mode)
 {
-    my_lcd.Set_Text_Mode(mode);
+    my_lcd.Set_Text_Mode(mode); // if true background of button is used
     my_lcd.Set_Text_Size(csize);
     my_lcd.Set_Text_colour(fc);
     my_lcd.Set_Text_Back_colour(bc);
     my_lcd.Print_String(str,x,y);
 }
-
+/* 
+  clears the visible part of the screen above the buttons
+*/
 void wipe_screen(){
    my_lcd.Set_Draw_color(BLACK);
-    my_lcd.Fill_Rectangle(0,0,480,260);
+  my_lcd.Fill_Rectangle(0,0,480,BUTTON_Y);
 
 }
 
 /*
 Prints a line on the TFT screen taking into account that there is
-a button row from y>300
+a button row from y>BUTTON_Y
 */
 void screen_println(char *str,uint8_t csize,uint16_t fc, uint16_t bc,boolean mode)
 {
-  if(screen_row > 252){
+  if(screen_row > (BUTTON_Y-8)){
     screen_row = 0;
     wipe_screen();
   }
@@ -331,8 +384,12 @@ void screen_println(char *str,uint8_t csize,uint16_t fc, uint16_t bc,boolean mod
     screen_row += 8*csize;
 }
 
+/*
+Prints the measured value and it's units + tag combi in one of the quadrants
+*/
 void update_display(double val,const char *str, const char *tag,int8_t q){
   uint16_t x=0,y=0;
+  // which quadrants needs an update
   switch( q ){
     case Q1:
      x = 10;
@@ -353,27 +410,22 @@ void update_display(double val,const char *str, const char *tag,int8_t q){
     default:
     break;
   }
+    // print the value
     my_lcd.Set_Text_Mode(false);
     my_lcd.Set_Text_Size(6);
     my_lcd.Set_Text_colour(YELLOW);
     my_lcd.Set_Text_Back_colour(BLACK);
     my_lcd.Print_Number_Float(val,1,x,y,'.',5,' ');
+    // print the unit and tag
     my_lcd.Set_Text_Size(3);
     my_lcd.Set_Text_colour(WHITE);
     my_lcd.Print_String( str,x+50,y+50);
     my_lcd.Print_String( tag,x+120,y+50);
 }
 
-void show_value(double val,char *str,int16_t x,int16_t y,uint8_t csize,uint16_t fc, uint16_t bc,boolean mode){
-    my_lcd.Set_Text_Mode(mode);
-    my_lcd.Set_Text_Size(csize);
-    my_lcd.Set_Text_colour(fc);
-    my_lcd.Set_Text_Back_colour(bc);
-    my_lcd.Print_Number_Float(val,1,x,y,'.',5,' ');
-    my_lcd.Set_Text_Size(csize/2);
-    my_lcd.Set_Text_colour(WHITE);
-    my_lcd.Print_String( str,x+120,y+50);
-}
+/*
+Show the menu as a row of 4 buttons on the lower part of the display
+*/
 void show_menu(void)
 {
     int i;
@@ -403,34 +455,47 @@ void show_menu(void)
 
 
 
-/* MPU specific defenitions go here
- *  
+/* 
+ *  MPU specific defenitions go here
  */
- /* accelerometer and magnetometer data */
-float mpu_a, mpu_ax, mpu_ay, mpu_az, mpu_h, mpu_hx, mpu_hy, mpu_hz;
-/* magnetometer calibration data */
-float mpu_hxb, mpu_hxs, mpu_hyb, mpu_hys, mpu_hzb, mpu_hzs;
-/* euler angles */
-float mpu_pitch_rad, mpu_roll_rad, mpu_yaw_rad, mpu_heading_rad;
-/* filtered heading */
-float mpu_filtered_heading_rad;
-float mpu_window_size = 20;
-/* conversion radians to degrees */
-const float mpu_R2D = 180.0f / PI;
-/* MPU 9250 data ready pin */
-const uint8_t kMpu9250DrdyPin = 53; //digital port with int
+#define I2Cclock 400000                                 // I2C clock is 400 kilobits/s
+#define I2Cport Wire                                    // I2C using Wire library
+#define MPU9250_ADDRESS MPU9250_ADDRESS_AD0             // MPU9250 address when ADO = 0 (0x68)  
+#define True_North false                                // change this to "true" for True North                
+float Declination = +1.57;                              // substitute your magnetic declination 
 
+// ----- software timer
+unsigned long Timer1 = 750000L;                         // 500mS loop ... used when sending data to to Processing
+unsigned long Stop1;                                    // Timer1 stops when micros() exceeds this value
+
+// ----- NZ Offsets & Scale-factors
+float
+/*
+Mag_x_offset = -34.560013,
+Mag_y_offset = 528.885,
+Mag_z_offset = -125.259995,
+Mag_x_scale = 1.0247924,
+Mag_y_scale = 0.99078894,
+Mag_z_scale = 0.9853226;
+*/
+Mag_x_offset = 1.0,
+Mag_y_offset = 1.0,
+Mag_z_offset = 180,
+Mag_x_scale = 1.0,
+Mag_y_scale = 1.0,
+Mag_z_scale = 1.0;
+
+ 
 /* EEPROM buffer to mag bias and scale factors */
 uint8_t eeprom_buffer[24];
 float calValue;
 
 /* MPU 9250 object */
-MPU9250 imu(Wire, 0x68);
+MPU9250 imu(MPU9250_ADDRESS, I2Cport, I2Cclock);      // Create imu instance using I2C at 400 kilobits/s
+
 
 bool on = true;
 byte pin = 22;
-long mpuTimerNow;
-long mpuTimerOld=0;
 
 //*** flag data on the mpu port is ready
 volatile bool mpuDataReady = false;
@@ -457,23 +522,15 @@ volatile bool listenerDataReady = false;
 void listenerReady(){
   listenerDataReady = true;
 }
+
+
 /*
-   Structures go here
+debugWrite() <--provides basic debug info from other tasks
+takes a String as input parameter
 */
-//*** A structure to hold the NMEA data
-
-typedef struct {
-  String fields[ MAX_NMEA_FIELDS ];
-  byte nrOfFields;
-  String sentence;
-
-}NMEAData ;
-
-// ***
-// *** debugWrite() <--provides basic debug info from other tasks
-// *** takes a String as input parameter
 void debugWrite(String debugMsg)
 {
+  
   #ifdef DISPLAY_ATTACHED
   int strlen = debugMsg.length();
   char charMsg[strlen];
@@ -482,14 +539,14 @@ void debugWrite(String debugMsg)
   }
     screen_println( charMsg,2,flag_colour,BLACK,false);
   #else
-    Serial.println(debugMsg);
+    if(debugMsg.length()>1) Serial.println(debugMsg);
+    else Serial.print(debugMsg);
     #endif
 }
+
 /*
    Class definitions go here
 */
-
-
 
 /*
   Purpose:  Helper class stacking NMEA data as a part of the multiplexer application
@@ -580,7 +637,7 @@ class NMEAParser
 {
  public:
     NMEAParser(NMEAStack *_ptrNMEAStack);
-    void setSentence( char _nmeaSentence);
+    void setSentence( String _nmeaSentence);
     void parseNMEASentence(String nmeaIn ); // parse an NMEA sentence with each part stored in the array
     NMEAData getNMEAData(); // getter function to get the NMEADAta struct
     
@@ -618,10 +675,10 @@ void NMEAParser::reset(){
   current_color=WHITE;
 }
 
-void NMEAParser::setSentence( char _nmeaSentence)
+void NMEAParser::setSentence( String _nmeaSentence)
 {
   #ifdef DEBUG
-  Serial.println( "NMEA received "+ _nmeaSentence );
+  debugWrite( "NMEA received "+String( _nmeaSentence) );
   #endif
   nmeaSentence = _nmeaSentence;
 }
@@ -636,7 +693,7 @@ NMEAData NMEAParser::nmeaSpecialty( NMEAData nmeaIn )
   String newSentence ="";
   NMEAData nmeaOut ;//= nmeaIn;
   #ifdef DEBUG
-  Serial.println( " Specialty found... for filter"+filter);
+  debugWrite( " Specialty found... for filter"+filter);
   #endif
   if ( filter.indexOf( nmeaIn.fields[0]) > -1 )
   {
@@ -647,7 +704,7 @@ NMEAData NMEAParser::nmeaSpecialty( NMEAData nmeaIn )
     //*** $IIDBK is not NMEA0183 compliant and needs conversion
     if ( nmeaIn.fields[0] == _DBK ) {
       #ifdef DEBUG
-      Serial.println("Found "+String(_DBK));
+      debugWrite("Found "+String(_DBK));
       #endif
       // a typical non standard DBK message I receive is
       // $IIDBK,A,0017.6,f,,,,
@@ -669,7 +726,7 @@ NMEAData NMEAParser::nmeaSpecialty( NMEAData nmeaIn )
       for( int i=0; i< nmeaOut.nrOfFields ; i++)
       {
         #ifdef DEBUG
-        Serial.println("Field["+String(i)+"] = "+nmeaOut.fields[i]);
+        debugWrite("Field["+String(i)+"] = "+nmeaOut.fields[i]);
         #endif
         if(i>0) nmeaOut.sentence+=",";
         nmeaOut.sentence += nmeaOut.fields[i];
@@ -677,7 +734,7 @@ NMEAData NMEAParser::nmeaSpecialty( NMEAData nmeaIn )
       nmeaOut.sentence += checksum( nmeaOut.sentence );
       
       #ifdef DEBUG
-      Serial.println( " Modified to:"+nmeaOut.sentence);
+      debugWrite( " Modified to:"+nmeaOut.sentence);
       #endif
       return nmeaOut;
     }
@@ -698,7 +755,7 @@ NMEAData NMEAParser::nmeaSpecialty( NMEAData nmeaIn )
       for( int i=0; i< nmeaOut.nrOfFields ; i++)
       {
         #ifdef DEBUG
-        Serial.println("Field["+String(i)+"] = "+nmeaOut.fields[i]);
+        debugWrite("Field["+String(i)+"] = "+nmeaOut.fields[i]);
         #endif
         if(i>0) nmeaOut.sentence+=",";
         nmeaOut.sentence += nmeaOut.fields[i];
@@ -738,11 +795,12 @@ void NMEAParser::parseNMEASentence(String nmeaStr)
   int sentenceLength = nmeaStr.length();
   String newSentence = "";  // used to construct the new senctence
   //*** check for a valid NMEA sentence
+  #ifdef DEBUG
+    debugWrite(" In te loop to parse for "+String(sentenceLength)+" chars");
+    #endif
   if ( nmeaStr[0] == '$' || nmeaStr[0] == '!' )
   {
-    #ifdef DEBUG
-    Serial.println(" In te loop to parse for "+String(sentenceLength)+" chars");
-    #endif
+    
     //*** parse the fields from the NMEA string
     //*** keeping in mind that indeOf() can return -1 if not found!
     currentIndex = nmeaStr.indexOf( ',',0);
@@ -777,9 +835,10 @@ void NMEAParser::parseNMEASentence(String nmeaStr)
     {
       nmeaData.sentence += checksum( nmeaData.sentence);
     }
-    
+
+    nmeaData.sentence += NMEA_TERMINATOR;
     #ifdef DEBUG
-    Serial.println("Parsed : "+nmeaData.sentence );
+    debugWrite("Parsed : "+nmeaData.sentence );
     #endif
     ptrNMEAStack->push( nmeaData );   //push the struct to the stack for later use; i.e. buffer it
   }
@@ -796,7 +855,6 @@ NMEAData NMEAParser::getNMEAData()
 }
 
 
-
 /***********************************************************************************
    Global variables go here
 */
@@ -804,101 +862,139 @@ NMEAStack       NmeaStack;
 NMEAParser      NmeaParser(&NmeaStack);
 NMEAData        NmeaData;
 
-
-
+/*
+  Initialize the NMEA Talker port and baudrate
+  on RX/TX port 2
+*/
 void initializeTalker(){
   Serial2.begin(TALKER_RATE); 
+  #ifdef DEBUG
+  debugWrite( "Talker initialized...");
+  #endif
 }
+
 /*
- * Start writin converted NNMEA sentences frm the stack
+ * Start reading converted NNMEA sentences from the stack
+ * and write them to Serial Port 2 to send them to the 
+ * external NMEA device.
+ * Update the display with the value(s) send
  */
 byte startTalking(){
   NMEAData nmeaOut;
   String outStr = "";
-  double tmpVal=0.0;
   
-  while( NmeaStack.getIndex() ){
+  #ifdef DISPLAY_ATTACHED
+  double tmpVal=0.0;
+  #endif
+  
+  //*** for all  NMEAData opjects on the stack
+  //*** NOTE; the stack has a buffer of NMEA_BUFFER_SIZE objects
+  //***       normaly only 1 or 2 should be on the stack
+  //***       if the stack is full your timing is out of control
+
+  if( NmeaStack.getIndex()>0 ){
       nmeaOut = NmeaStack.pop();
       outStr =nmeaOut.sentence;
-      char outChar[NMEA_BUFFER_SIZE];
-      for(int i=0; i< (int) outStr.length(); i++){
+      
+
+      for(int i=0; i< (int) sizeof(outStr); i++){
+        //outChar[i]=outStr[i];
         Serial2.write( outStr[i]);
-        outChar[i]=outStr[i];
       }
       #ifdef DEBUG
       debugWrite(" Sending :" + outStr );
       #endif
-      switch(active_menu_button){
-        case SPEED:
-         if(nmeaOut.fields[0]== _RMC){
-           tmpVal=nmeaOut.fields[7].toDouble();
-           update_display( tmpVal,screen_units[SPEED],"SOG",Q1);
-         }
-         if(nmeaOut.fields[0]== _VHW){
-           tmpVal=nmeaOut.fields[5].toDouble();
-           update_display( tmpVal,screen_units[SPEED],"STW",Q2);
-         }if(nmeaOut.fields[0]== _VWR){
-           tmpVal=nmeaOut.fields[3].toDouble();
-           update_display( tmpVal,screen_units[SPEED],"AWS",Q3);
-           tmpVal=nmeaOut.fields[1].toDouble();
-           char tmpChr[(nmeaOut.fields[2].length())];
-           (nmeaOut.fields[2]).toCharArray(tmpChr,nmeaOut.fields[2].length(),0);
-          update_display( tmpVal,screen_units[DEGR],"AWA",Q4);
-         }
-        break;
-        case CRS:
+  }
+  #ifdef DISPLAY_ATTACHED
+  // check which screens is active and update with data
+  switch (active_menu_button){
+  
+    case SPEED:
+      if(nmeaOut.fields[0]== _RMC){
+        tmpVal=nmeaOut.fields[7].toDouble();
+        update_display( tmpVal,screen_units[SPEED],"SOG",Q1);
+      }
+      if(nmeaOut.fields[0]== _VHW){
+        tmpVal=nmeaOut.fields[5].toDouble();
+        update_display( tmpVal,screen_units[SPEED],"STW",Q2);
+      }
+      if(nmeaOut.fields[0]== _VWR){
+        tmpVal=nmeaOut.fields[3].toDouble();
+        update_display( tmpVal,screen_units[SPEED],"AWS",Q3);
+        tmpVal=nmeaOut.fields[1].toDouble();
+        char tmpChr[(nmeaOut.fields[2].length())];
+        (nmeaOut.fields[2]).toCharArray(tmpChr,nmeaOut.fields[2].length(),0);
+      update_display( tmpVal,screen_units[DEGR],"AWA",Q4);
+      }
+    break;
+    case CRS:
         if(nmeaOut.fields[0]== _RMC){
-          tmpVal=nmeaOut.fields[8].toDouble();
-           update_display( tmpVal,screen_units[DEGR],"TRUE",Q1);
-         }
-         if(nmeaOut.fields[0]== _hDG){
-           tmpVal=nmeaOut.fields[1].toDouble();
-           update_display( tmpVal,screen_units[DEGR],"MAG",Q2);
-         }
-         if(nmeaOut.fields[0]== _dBK){
-           tmpVal=nmeaOut.fields[3].toDouble();
-           update_display( tmpVal,screen_units[MTRS],"DPT",Q3);
-         }
-         if(nmeaOut.fields[0]== _VLW){
-           tmpVal=nmeaOut.fields[3].toDouble();
-           update_display( tmpVal,screen_units[DIST],"TRIP" ,Q4);
-         }
-        break;
-        case ALL:
+        tmpVal=nmeaOut.fields[8].toDouble();
+          update_display( tmpVal,screen_units[DEGR],"TRUE",Q1);
+        }
+        if(nmeaOut.fields[0]== _hDG){
+          tmpVal=nmeaOut.fields[1].toDouble();
+          update_display( tmpVal,screen_units[DEGR],"MAG",Q2);
+        }
+        /*
+        if(nmeaOut.fields[0]== _xDR ){
+          if(nmeaOut.fields[4]== "PITCH"){
+            tmpVal=nmeaOut.fields[2].toDouble();
+            update_display( tmpVal,screen_units[DEGR],"PITCH",Q3);
+          }
+          //*** if we found PITCH we also have ROLL
+          if(nmeaOut.fields[8]== "ROLL"){
+            tmpVal=nmeaOut.fields[6].toDouble();
+            update_display( tmpVal,screen_units[DEGR],"ROLL",Q4);
+          }
+        }
+        */
+        if(nmeaOut.fields[0]== _DBS){
+          tmpVal=nmeaOut.fields[3].toDouble();
+          update_display( tmpVal,screen_units[MTRS],"DPT",Q3);
+        }
+        if(nmeaOut.fields[0]== _VLW){
+          tmpVal=nmeaOut.fields[3].toDouble();
+          update_display( tmpVal,screen_units[DIST],"TRIP" ,Q4);
+        }
+        
+    break;
+    case ALL:
         if(nmeaOut.fields[0]== _xDR ){
           if(nmeaOut.fields[4]== "BATT"){
             tmpVal=nmeaOut.fields[2].toDouble();
-           update_display( tmpVal,screen_units[VOLT],"BAT",Q1);
+            update_display( tmpVal,screen_units[VOLT],"BAT",Q1);
           }
-         }
-         if(nmeaOut.fields[0]== _MTW){
-           tmpVal=nmeaOut.fields[1].toDouble();
-           update_display( tmpVal,screen_units[TEMP],"WTR",Q2);
-         }
-         if(nmeaOut.fields[0]== _VLW){
-           tmpVal=nmeaOut.fields[1].toDouble();
-           update_display( tmpVal,screen_units[DIST],"LOG",Q3);
-         }
-         if(nmeaOut.fields[0]== _VLW){
-           tmpVal=nmeaOut.fields[3].toDouble();
-           update_display( tmpVal,screen_units[DIST],"TRP",Q4);
-         }
-        break;
-        case LOG:
-        if( outStr.indexOf(TALKER_ID)>0){
-            current_color = LOG_COLOR;
-        } else current_color = WHITE;
-        screen_println( outChar,1,current_color,BLACK,false);
-        break;
-        default:
-        break;
-      }
+        }
+        if(nmeaOut.fields[0]== _MTW){
+            tmpVal=nmeaOut.fields[1].toDouble();
+            update_display( tmpVal,screen_units[TEMP],"WTR",Q2);
+          }
+          if(nmeaOut.fields[0]== _VLW){
+            tmpVal=nmeaOut.fields[1].toDouble();
+            update_display( tmpVal,screen_units[DIST],"LOG",Q3);
+          }
+          if(nmeaOut.fields[0]== _VLW){
+            tmpVal=nmeaOut.fields[3].toDouble();
+            update_display( tmpVal,screen_units[DIST],"TRP",Q4);
+          }
+    break;
+    case LOG:
+      default:
       
+      debugWrite( outStr );
+      
+    break;
   }
+  #endif
+  
+  
   return 1;
 }
+  
 
- /* sets the sentence in the nmeaData attrubure and itself to runnable 
+
+ /* sets the sentence in the nmeaData attribute and itself to runnable 
  */
 void setNMEASentence( String _nmeaIn ){
   NmeaData.sentence = _nmeaIn;
@@ -909,22 +1005,104 @@ void setNMEASentence( String _nmeaIn ){
             - Reading NMEA0183 v1.5 data without a checksum,
 */
 
+/*
+Cleasr the inputbuffer by reading until empty, since Serial.flush does not this anymore
+*/
+void clearNMEAInputBuffer(){
+  while( nmeaSerial.available()>0){
+    nmeaSerial.read();
+  }
+
+}
 
 void initializeListener()
 {
-  Serial1.begin(LISTENER_RATE);
+  nmeaSerial.begin(LISTENER_RATE);
+  clearNMEAInputBuffer();
+  #ifdef DEBUG
+  debugWrite( "Listener initialized...");
+  #endif
 }
+
+/*
+  Decode the incomming character and test if it is valid NMEA data.
+  If true than put it the NMEA buffer and call NMEAParser object
+  to process incomming and complete MNEA sentence
+*/
+void decodeNMEAInput(char cIn){
+  
+  switch( cIn ){
+    case '~':
+      // reserved by NMEA
+    case '!':
+    case '$':
+      nmeaStatus = RECEIVING;
+      break;
+    case '*':
+      if(nmeaStatus==RECEIVING){
+      nmeaStatus = CHECKSUMMING;
+      }
+      break;
+    case '\n':
+    case '\r':
+      // in old v1.5 version, NMEA Data may not be checksummed!
+      if(nmeaStatus== RECEIVING || nmeaStatus==CHECKSUMMING){
+        nmeaDataReady = true;
+      }
+      nmeaStatus = TERMINATING;
+      break;
+    default:
+      
+      break;
+  }
+  switch(nmeaStatus){
+    case INVALID:
+      // do nothing
+      nmeaIndex=0;
+      nmeaDataReady = false;
+      break;
+    case RECEIVING:
+    case CHECKSUMMING:
+      nmeaBuffer[nmeaIndex] = cIn;
+      nmeaIndex++;
+      break;
+    case TERMINATING:
+    
+    nmeaStatus = INVALID;
+    if( nmeaDataReady){
+      nmeaDataReady = false;
+      
+      //char nmeaOut[nmeaIndex];
+      //memcpy(nmeaOut, nmeaBuffer, nmeaIndex);
+      for(int y=nmeaIndex+1; y<NMEA_BUFFER_SIZE; y++){
+        nmeaBuffer[y]='\0';
+      }
+      #ifdef DEBUG
+      debugWrite( nmeaOut);
+      #endif
+      NmeaParser.parseNMEASentence( nmeaBuffer );
+      memset( nmeaBuffer, 0, NMEA_BUFFER_SIZE);
+      nmeaIndex=0;
+    }
+    //clearNMEAInputBuffer();
+      break;
+  }
+}
+
 /*
  * tart listeneing for incomming NNMEA sentence
  */
-bool startListening()
+void startListening()
 {
-  if( Serial1.available() ){
-    String nmeaBuffer="";
-    nmeaBuffer = Serial1.readStringUntil( '\n' );
-    NmeaParser.parseNMEASentence( nmeaBuffer );
-  return true;
-  } else return false;
+  #ifdef DEBUG
+    debugWrite("Listening....");
+    #endif
+  
+  while(  nmeaSerial.available()>0 && nmeaStatus != TERMINATING){
+    decodeNMEAInput( nmeaSerial.read());
+  }
+  
+  
 }
 
 
@@ -935,9 +1113,9 @@ int keyboardListener()
   while(Serial.available()){
     
     c = Serial.read();
-    Serial.println("Character(s) received------------------------------");
-    Serial.println( c);
-    Serial.println("################################################");
+    debugWrite("Character(s) received------------------------------");
+    debugWrite( String(c));
+    debugWrite("################################################");
     
   
   }
@@ -959,24 +1137,147 @@ float constrainAngle360(float dta) {
 }
 
 void initializeMPU(){
-/* Serial for displaying results */
+  /* Serial for displaying results */
   #ifdef DEBUG
-  Serial.begin(115200);
+  Serial.begin(SAMPLERATE);
   while(!Serial) {}
   #endif
   /* 
   * Start the sensor, set the bandwidth the 10 Hz, the output data rate to
   * 50 Hz, and enable the data ready interrupt. 
   */
+  Wire.begin();                                         // Start I2C as master
+  Wire.setClock(400000);                                // Set I2C clock speed to 400kbs
+
+    // ----- Look for MPU9250|MPU9255
+  byte gyroID = imu.readByte(MPU9250_ADDRESS, WHO_AM_I_MPU9250);
+  if (!((gyroID == 0x71) || (gyroID == 0x73))){
+    // ------ Failed to connect
+    debugWrite(("WHO_AM_I = "));
+    debugWrite(String(gyroID, HEX));
+    debugWrite(("Could not connect to the MPU9250/MPU9255"));
+    debugWrite(("Communication failed ... program aborted !!"));
+    abort();
+  } else
+  {
+  // ----- Start by performing self test and reporting values
+    imu.MPU9250SelfTest(imu.selfTest);
+    debugWrite(("x-axis self test: acceleration trim within : "));
+    debugWrite(String(imu.selfTest[0], 1)+" % of factory value");
+
+    debugWrite("y-axis self test: acceleration trim within : ");
+    debugWrite(String(imu.selfTest[1], 1)+" % of factory value");
+
+    debugWrite("z-axis self test: acceleration trim within : ");
+    debugWrite(String(imu.selfTest[2], 1)+" % of factory value");
+
+    debugWrite("x-axis self test: gyration trim within : ");
+    debugWrite(String(imu.selfTest[3], 1)+" % of factory value");
+
+    debugWrite("y-axis self test: gyration trim within : ");
+    debugWrite(String(imu.selfTest[4], 1)+" % of factory value");
+
+    debugWrite("z-axis self test: gyration trim within : ");
+    debugWrite(String(imu.selfTest[5], 1)+" % of factory value");
+    debugWrite("Place the compass on a level surface");
+    
+    // allow time to place the compass in position
+    delay(4000); 
+
+    // ----- Calibrate gyro and accelerometers, load biases in bias registers
+    imu.calibrateMPU9250(imu.gyroBias, imu.accelBias);
+
+    // ----- Initialize device for active mode read of accelerometer, gyroscope, and
+    //       temperature
+    imu.initMPU9250();
+    debugWrite("MPU9250 initialized for active data mode....");
+    
+
+    // ----- Look for the AK8963 magnetometer
+    byte MagID = imu.readByte(AK8963_ADDRESS, WHO_AM_I_AK8963);
+    if (!(MagID == 0x48))
+    {
+      // ----- Communication failed, stop here
+      debugWrite("WHO_AM_I = ");
+      debugWrite(String(MagID, HEX));
+      debugWrite("Could not connect to the AK8963");
+      debugWrite("Communication failed ... program aborted !!");
+      abort();
+    } else
+    {
+      // ----- AK8963 found
+      debugWrite("WHO_AM_I = 0x48\nAK8963 is online ...");
+      
+      // ----- Get factory ASA calibration values
+      imu.initAK8963(imu.factoryMagCalibration);
+
+      // ----- Initialize device for active mode read of magnetometer
+      debugWrite("AK8963 initialized for active data mode....");
+      #ifdef DEBUG
+      // ----- Display AK8963 fuse rom values
+      debugWrite("AK8963 Fuse ROM values: ");
+      debugWrite("ASAX: ");
+      debugWrite(String(imu.factoryMagCalibration[0], 2));
+      debugWrite("ASAY: ");
+      debugWrite(String(imu.factoryMagCalibration[1], 2));
+      debugWrite("ASAZ: ");
+      debugWrite(String(imu.factoryMagCalibration[2], 2));
+      debugWrite("");
+      #endif
+      // ----- Get correct sensor resolutions (You only need to do this once)
+      imu.getAres();      // milli-gravity
+      imu.getGres();      // dps
+      imu.getMres();      // milli-Gauss 14-bit|16-bit
+
+      #ifdef DEBUG
+      // ---- display sensor scale multipliers
+      debugWrite("Sensor-scale multipliers");
+      debugWrite("accel: ");
+      debugWrite(String(imu.aRes, 6));
+      debugWrite(" gyro: ");
+      debugWrite(String(imu.gRes, 6));
+      debugWrite("  mag: ");
+      debugWrite(String(imu.mRes, 6));
+      debugWrite("");
+      #endif
+        // ----- Copy the hard-iron offsets
+      imu.magBias[0] = Mag_x_offset;
+      imu.magBias[1] = Mag_y_offset;
+      imu.magBias[2] = Mag_z_offset;
+
+      // ----- Copy the soft-iron scalefactors
+      imu.magScale[0] = Mag_x_scale;
+      imu.magScale[1] = Mag_y_scale;
+      imu.magScale[2] = Mag_z_scale;
+
+      mpuNeedsCalibration=false;
+      #ifdef DEBUG
+      // ----- Display offsets & scale-factors
+      debugWrite("Mag_x_offset = ");
+      debugWrite(String(imu.magBias[0]));
+      debugWrite("Mag_y_offset = ");
+      debugWrite(String(imu.magBias[1]));
+      debugWrite("Mag_z_offset = ");
+      debugWrite(String(imu.magBias[2]));
+      debugWrite("Mag_x_scale = ");
+      debugWrite(String(imu.magScale[0]));
+      debugWrite("Mag_y_scale = ");
+      debugWrite(String(imu.magScale[1]));
+      debugWrite("Mag_z_scale = ");
+      debugWrite(String(imu.magScale[2]));
+      debugWrite("");
+      #endif
+      // ----- start software timer
+      Stop1 = micros() + Timer1;                            // Used by send_data() function
+
+    }    
+  }
+  /*** old mpu code
   imu.begin();
   imu.setDlpfBandwidth(MPU9250::DLPF_BANDWIDTH_10HZ);
   imu.setSrd(19);
   //imu.enableDataReadyInterrupt();
   
-  /*
-  * Load the magnetometer calibration
-  */
- 
   uint8_t eeprom_buffer[24];
   for (unsigned int i = 0; i < sizeof(eeprom_buffer); i++ ) {
     eeprom_buffer[i] = EEPROM.read(i);
@@ -1004,11 +1305,11 @@ void initializeMPU(){
   debugWrite("mpu_hyb:"+String( mpu_hyb,3 )+'\t'+"mpu_hys:"+String(mpu_hys,3));
   debugWrite("mpu_hzb:"+String( mpu_hzb,3 )+'\t'+"mpu_hzs:"+String(mpu_hzs,3));
   #endif
-  /* Attach the data ready interrupt to the data ready ISR */
-  /* With Touchscreen attached no interrupt pin free
+  // Attach the data ready interrupt to the data ready ISR 
+  // With Touchscreen attached no interrupt pin free
   pinMode(kMpu9250DrdyPin, INPUT);
   attachInterrupt(kMpu9250DrdyPin, mpuReady, RISING);  
-  */
+ 
   mpuDataReady= true;
   debugWrite( "MPU9250 initialized and ready to go...");
   } else{
@@ -1020,69 +1321,116 @@ void initializeMPU(){
   debugWrite("mpu_hyb:"+String( mpu_hyb,3 )+'\t'+"mpu_hys:"+String(mpu_hys,3));
   debugWrite("mpu_hzb:"+String( mpu_hzb,3 )+'\t'+"mpu_hzs:"+String(mpu_hzs,3));
   }
-  
+  */
+ #ifdef DEBUG
+ debugWrite("Inititializing done. MPU ready to go...");
+ #endif
 }
 
 void sampleMPU(){
-  mpuDataReady = false;
-  /* Read the MPU 9250 data */
-  imu.readSensor();
-  mpu_ax = imu.getAccelX_mss();
-  mpu_ay = imu.getAccelY_mss();
-  mpu_az = imu.getAccelZ_mss();
-  mpu_hx = imu.getMagX_uT();
-  mpu_hy = imu.getMagY_uT();
-  mpu_hz = imu.getMagZ_uT();
-  /* Normalize accelerometer and magnetometer data */
-  mpu_a = sqrtf(mpu_ax * mpu_ax + mpu_ay * mpu_ay + mpu_az * mpu_az);
-  mpu_ax /= mpu_a;
-  mpu_ay /= mpu_a;
-  mpu_az /= mpu_a;
-  mpu_h = sqrtf(mpu_hx * mpu_hx + mpu_hy * mpu_hy + mpu_hz * mpu_hz);
-  mpu_hx /= mpu_h;
-  mpu_hy /= mpu_h;
-  mpu_hz /= mpu_h;
-  /* Compute euler angles */
-  mpu_pitch_rad = asinf(mpu_ax);
-  mpu_roll_rad = asinf(-mpu_ay / cosf(mpu_pitch_rad));
-  mpu_yaw_rad = atan2f(mpu_hz * sinf(mpu_roll_rad) - mpu_hy * cosf(mpu_roll_rad), mpu_hx * cosf(mpu_pitch_rad) + mpu_hy * sinf(mpu_pitch_rad) * sinf(mpu_roll_rad) + mpu_hz * sinf(mpu_pitch_rad) * cosf(mpu_roll_rad));
-  mpu_heading_rad = constrainAngle360(mpu_yaw_rad);
-  /* Filtering heading */
-  mpu_filtered_heading_rad = (mpu_filtered_heading_rad * (mpu_window_size - 1.0f) + mpu_heading_rad) / mpu_window_size;
-  /* Display the results */
+  // ----- Perform these tasks every 500mS
+  // ----- Poll the MPU9250 interrupt status in I2C mode
   #ifdef DEBUG
-  Serial.print(mpu_pitch_rad * mpu_R2D);
-  Serial.print("\t");
-  Serial.print(mpu_roll_rad * mpu_R2D);
-  Serial.print("\t");
-  Serial.print(mpu_yaw_rad * mpu_R2D);
-  Serial.print("\t");
-  Serial.print(mpu_heading_rad * mpu_R2D);
-  Serial.print("\t");
-  Serial.println(mpu_filtered_heading_rad * mpu_R2D);
-  #endif  
-  mpuNMEAString = "$"+String(TALKER_ID)+"HDG,"+String(float(mpu_filtered_heading_rad*mpu_R2D),2)+",,,"+String(VARIATION);
-  NmeaParser.parseNMEASentence( mpuNMEAString );
-  mpuDataReady= true;
+    debugWrite("Sampling MPU....");
+    #endif
+  if (imu.readByte(MPU9250_ADDRESS, INT_STATUS) & 0x01)
+  {
+    #ifdef DEBUG
+    debugWrite("Reading MPU....");
+    #endif
+    // ----- Read the accelerometer x|y|z register values
+    imu.readAccelData(imu.accelCount);                                  // Read accelerometer register values
+
+    // ----- Now we'll calculate the acceleration value into actual g's
+    //       This depends on scale being set
+    imu.ax = (float)imu.accelCount[0] * imu.aRes;                     // Convert raw register value to milli-Gauss
+    imu.ay = (float)imu.accelCount[1] * imu.aRes;                     // Convert raw register value to milli-Gauss
+    imu.az = (float)imu.accelCount[2] * imu.aRes;                     // Convert raw register value to milli-Gauss
+
+    // ----- Read the gyro x|y|z register values
+    imu.readGyroData(imu.gyroCount);                                    // Read gyro register values
+
+    // ----- Calculate the gyro value into actual degrees per second
+    //       This depends on scale being set
+    imu.gx = (float)imu.gyroCount[0] * imu.gRes;                      // Convert raw register value to dps  <-+   plus -ve sign for positive pitch
+    imu.gy = (float)imu.gyroCount[1] * imu.gRes;                      // Convert raw register value to dps  <-+--- gx & gy interchanged
+    imu.gz = (float)imu.gyroCount[2] * imu.gRes;                      // Convert raw register value to dps <----- applied -ve sign for CW rotation
+
+    // Read the magnetometer x|y|z register values
+    imu.readMagData(imu.magCount);                                      // Read magnetometer register values
+
+    // ----- Calculate the magnetometer values in milliGauss and  apply
+    //       the ASA fuse ROM values and milli-Gauss scale corrections
+    //       The MPU92590 magnetometer uses the 14-bit scale-correction of 0.6
+    imu.mx = (float)imu.magCount[0] * imu.mRes * imu.factoryMagCalibration[0] - imu.magBias[0];   // Convert/correct raw register value to milli-Gauss
+    imu.my = (float)imu.magCount[1] * imu.mRes * imu.factoryMagCalibration[1] - imu.magBias[1];   // Convert/correct raw register value to milli-Gauss
+    imu.mz = (float)imu.magCount[2] * imu.mRes * imu.factoryMagCalibration[2] - imu.magBias[2];   // Convert/correct raw register value to milli-Gauss
+  }
+
+  // ----- This library function MUST be called before updating the Mahoney quaternions!
+  imu.updateTime();
+
+  /*
+    The following quaternion values assume that the MPU-9250 gyro X-axis
+    is pointing North and that the gyro Z-axis is pointing upwards.
+
+    These values produce:
+      - a clockwise heading of 0..360 degrees if we use the formula "Heading = atan2(imu.mx, imu.my;"
+      - q0,q1,q2,q3 values of 1,0,0,0 when the compass is pointing north
+  */
+
+  MahonyQuaternionUpdate(  imu.ax,              -imu.ay,              imu.az,
+                          imu.gx * DEG_TO_RAD, -imu.gy * DEG_TO_RAD, imu.gz * DEG_TO_RAD,
+                          imu.my,              -imu.mx,              -imu.mz,
+                          imu.deltat);
+
+  //  MadgwickQuaternionUpdate( imu.ax,              -imu.ay,              imu.az,
+  //                            imu.gx * DEG_TO_RAD, -imu.gy * DEG_TO_RAD, imu.gz * DEG_TO_RAD,
+  //                            imu.my,              -imu.mx,              -imu.mz,
+  //                            imu.deltat);
+
+  // ----- calculate the pitch in degrees using Magwick quaternions
+  imu.pitch = asin(2.0f * (*(getQ() + 1) * *(getQ() + 3) - *getQ() * *(getQ() + 2)));
+
+  // ----- calculate the roll in degrees using Magwick quaternions
+  imu.roll = -atan2(2.0f * (*getQ() * *(getQ() + 1) + * (getQ() + 2) * *(getQ() + 3)), *getQ() * *getQ() - * (getQ() + 1)
+                      * *(getQ() + 1) - * (getQ() + 2) * *(getQ() + 2) + * (getQ() + 3) * *(getQ() + 3));
+
+  // ----- calculate the yaw in degrees using Magwick quaternions
+  imu.yaw = atan2(2.0f * (*(getQ() + 1) * *(getQ() + 2) + *getQ() * *(getQ() + 3)), *getQ() * *getQ() + * (getQ() + 1)
+                    * *(getQ() + 1) - * (getQ() + 2) * *(getQ() + 2) - * (getQ() + 3) * *(getQ() + 3));
+  
+  
+  
+  
 }
 
 void calibrateMPU(){
+
+  
   /* Serial for displaying instructions */
   #ifdef DEBUG
   Serial.end();
   delay(15);
-  Serial.begin(115200);
+  Serial.begin(SAMPLERATE);
   while(!Serial) {}
   /* Start communication with IMU */
   #endif
- imu.begin();
+  
   /* Calibrate magnetometer */
   debugWrite("Calibrating magnetometer, slowly move in a figure 8 until done...");
-  imu.calibrateMag();
+  imu.magCalMPU9250(imu.magBias, imu.magScale);
+
+  // -----Read the magnetometer x|y|z register values
+  imu.readMagData(imu.magCount);
+
+  
   debugWrite("Done!");
+
+  /* TO DO
   debugWrite("Saving results to EEPROM...");
 
-  /* Save to EEPROM */
+  // Save to EEPROM 
   
   calValue = imu.getMagBiasX_uT();
   memcpy(eeprom_buffer, &calValue, sizeof(calValue));
@@ -1102,26 +1450,47 @@ void calibrateMPU(){
   
   debugWrite("Done! You may power off your board.");
   while(1){}
-
+*/
   
 }
 
+void readIMUSensor(){
+  /*
+    For all practical purposes the compass yaw and compass heading are the same
+  */
+ #ifdef DEBUG
+  debugWrite("reading MPU sensordata...");
+  #endif
+  // ----- display the heading
+  float heading = imu.yaw * RAD_TO_DEG;
+  if (heading < 0) heading += 360.0;              // Yaw goes negative between 180 amd 360 degrees
+  if (True_North == true) heading += Declination; // calculate True North
+  if (heading < 0) heading += 360.0; 
+  if (heading > 360) heading -= 360.0;
+  
+  mpuNMEAString = "$"+String(TALKER_ID)+"HDG,"+String(heading,1)+",,,"+String(VARIATION);
+  NmeaParser.parseNMEASentence( mpuNMEAString );
+  mpuNMEAString = "$"+String(TALKER_ID)+"XDR,,"+String((imu.pitch * RAD_TO_DEG),1)+",D,PITCH,,"+String((imu.roll * RAD_TO_DEG),1)+",D,ROLL";
+  NmeaParser.parseNMEASentence( mpuNMEAString );
+  startTalking();
+}
 /*
  * End MPU related functions
  */
 
 #ifdef TEST
+
 String NmeaStream[10] ={
-  "$IIVWR,151,R,02.4,N,,,,",
-  "$IIMTW,12.2,C",
-  "!AIVDM,1,1,,A,13aL<mhP000J9:PN?<jf4?vLP88B,0*2B",
-  "$IIDBK,A,0014.4,f,,,,",
-  "$IIVLW,1149.1,N,001.07,N",
-  "$GPGLL,5251.3091,N,00541.8037,E,151314.000,A,D*5B",
-  "$GPRMC,095218.000,A,5251.5621,N,00540.8482,E,4.25,201.77,120420,,,D*6D",
-  "$PSTOB,13.0,v",
-  "$IIVWR,151,R,02.3,N,,,,",
-  "$IIVHW,,,000,M,01.57,N,,"
+  "$IIVWR,151,R,02.4,N,,,,\r\n",
+  "$IIMTW,12.2,C\r\n",
+  "!AIVDM,1,1,,A,13aL<mhP000J9:PN?<jf4?vLP88B,0*2B\r\n",
+  "$IIDBK,A,0014.4,f,,,,\r\n",
+  "$IIVLW,1149.1,N,001.07,N\r\n",
+  "$GPGLL,5251.3091,N,00541.8037,E,151314.000,A,D*5B\r\n",
+  "$GPRMC,095218.000,A,5251.5621,N,00540.8482,E,4.25,201.77,120420,,,D*6D\r\n",
+  "$PSTOB,13.0,v\r\n",
+  "$IIVWR,151,R,02.3,N,,,,\r\n",
+  "$IIVHW,,,000,M,01.57,N,,\r\n"
   };
 
  int softIndex = 0;
@@ -1149,6 +1518,15 @@ void runSoftGenerator()
       
         
       NmeaParser.parseNMEASentence(NmeaStream[softIndex++]);
+      /*
+      if(Serial2.availableForWrite()){
+      for(uint16_t c=0; c< (NmeaStream[softIndex]).length(); c++){
+        Serial2.write((NmeaStream[softIndex]).charAt(c));
+      }
+      }
+      */
+      delay(20);
+      softIndex++;
       } else softIndex=0;
   
  // }
@@ -1171,7 +1549,7 @@ void buttonPressed(){
     pt = p;
     p.y = map(pt.x, TS_MINX, TS_MAXX, my_lcd.Get_Display_Height(),0);
     p.x = map(pt.y, TS_MINY, TS_MAXY, my_lcd.Get_Display_Width(),0);
-  //Serial.println( "x= "+String(p.x)+"y = "+String(p.y)+" z= "+String(p.z)+" treshold= "+String(ts.pressureThreshhold));
+  //debugWrite( "x= "+String(p.x)+"y = "+String(p.y)+" z= "+String(p.z)+" treshold= "+String(ts.pressureThreshhold));
     if(p.y> BUTTON_Y && p.y<(BUTTON_Y+BUTTON_H)){
       if(p.x>(2*(BUTTON_X+BUTTON_W))){
         //button ALL or LOG pressed
@@ -1201,53 +1579,57 @@ void buttonPressed(){
 }
 void setup() {
   // put your setup code here, to run once:
-  Serial.begin(115200);
+  Serial.begin(SAMPLERATE);
+  #ifdef DISPLAY_ATTACHED
   my_lcd.Set_Rotation(1); //Landscape
   my_lcd.Init_LCD();
   my_lcd.Fill_Screen(BLACK); 
-  show_string(VESSEL_NAME,CENTER,132,8,RED,BLACK,false);
+  char vessel_name[] = VESSEL_NAME;
+  show_string(  vessel_name,CENTER,132,8,RED,BLACK,false);
   flag_colour = YELLOW;
+  #endif
+
+  #ifdef MPU_ATTACHED
   initializeMPU();
   
   if( mpuNeedsCalibration ){
     calibrateMPU();
-  } else{ 
-  
-    initializeListener();
-    initializeTalker();
+  } 
+  #endif
+
+  initializeListener();
+  initializeTalker();
     
-  }
-  
+  #ifdef DISPLAY_ATTACHED
   show_menu();
-  
+  #endif
+  // ----- start software timer
+  Stop1 = micros() + Timer1; 
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
-
-#ifdef TEST
+  //sampleMPU(); 
+  #ifdef TEST
   runSoftGenerator();
-  delay(100);
-  startTalking();
-  
-#endif
-  //if( startListening() ) startTalking();
-  //delay(250);
- if (mpuDataReady){
-    sampleMPU();  
+  #endif
+
+  //*** peridically read the MPU sensor and
+  //*** generate NMEA data
+  #ifdef MPU_ATTACHED
+ if (micros() > Stop1)
+  {
+    Stop1 += Timer1;                                    // Reset timer
+
+    //readIMUSensor(); 
   }
-  
-  startTalking();
-  
-  
+  #endif
+  startListening();
 
-
-  digitalWrite(13, HIGH);
-  digitalWrite(13, LOW);
-
+  #ifdef DISPLAY_ATTACHED
   buttonPressed();
-  
-  //delay(250);
-  
+  #endif
+
+  startTalking();
 }
 
