@@ -5,24 +5,15 @@
   URL:      https://www.hackster.io/waps61
   Date:     30-04-2020
   Last
-  Update:   29-05-2020
-  Achieved: pre-FAT failed due to erroneous implementation of reading input and sending output.
-            Functions startListening and Start Talking are overhauled. Function decodeNMEAInput
-            added to test and process valid incomming NMEA data.
+  Update:   06-06-2020
+  Achieved: Successful 2nd FAT on board. This software now reads NMEA data  incomming on
+            Rx2 and sends data to a external multiplexer via Pin 50 (and inverted) via SoftSerial
             
   Purpose:  Build an NMEA0183 manupulator and animator for on board of my sailing boat
             supporting following types of tasks:
             - Reading NMEA0183 v1.5 data without a checksum,
-            - Filtering out current heading data causing incorrect course in fo in navigation app
-              i.e. HDG, HDM and VHW messages
             - Getting new course and roll & pitch data from a MPU9250
             - Inject this new data into the datastream (aka multiplexing)
-
-            The idea is to make this an event triggered or at least a Task scheduled program
-            - Task - Runs repeatedly
-            - Timed Task - Runs at a specified rate (100ms, 1000ms, etc.) like reading the MPU9250
-            - TriggeredTask - Runs when triggered by an external source, like reading NMEA data
-
 
   NOTE:     NMEA encoding conventions in short
             An NMEA sentence consists of a start delimiter, followed by a comma-separated sequence
@@ -38,7 +29,7 @@
 
   Minimal Hardware setup MPU9255:
   MPU9255/6500 ------------- Arduino
-  VCC ---------------------- 3.3V
+  VCC ---------------------- 5V
   GND ---------------------- GND
   SDA ---------------------- SDA20
   SCL ---------------------- SCL21
@@ -47,17 +38,14 @@
   INT ---------------------- ?
  
   Serial is reserved for the MPU9250 communication
-        Digital pin 53 (and 51) are reserved for the NMEA listener
-        via SoftSerial
-        Serial2 is reserved for NMEA talker
+  Rx2 is reserved for the NMEA listener on 4800Bd
+  Digital pin 50 (and 52) are reserved for NMEA talker via
+  SoftSerial on 38400 Bd
   
   Hardware setup:
-  Wiring Diagram (for RS-232 to TTL converter MAX3232)
-  NMEA-0183 | MAX3232 | ARDUINO
-     TX     |  T1 OUT |
-            |  R1 OUT | Receive Pin
 
   Wiring Diagram (for RS-422 / RS-485 shifter)
+  This is used in my case.
   NMEA-0183 | RS-422/485 Shifter | ARDUINO
     NMEA+   |     B              |
     NMEA-   |     A              |
@@ -67,10 +55,10 @@
             |     RO             |  Receive Pin
 
 Wiring Diagram (for RS-232 to NMEA0183 device)
-  Arduino | NMEA device
-     TX2  |  RX +   
-     GND  |  RX - 
-          |  GND (if isolated input available)
+  Arduino   | NMEA device
+     Pin 50 |  RX +   
+     GND    |  RX - 
+            |  GND (if isolated input available)
 
 Set the pins to the correct ones for your development shield or breakout board.
 This program use these 8bit data lines to the LCD,
@@ -138,8 +126,8 @@ Credit:
 
 #define LISTENER_RATE 4800 // Baudrate for the listner
 #define LISTENER_PORT 53   // SoftSerial port 
-#define TALKER_RATE 4800 // Baudrate for the talker
-#define TALKER_PORT 2   // Serial port 2
+#define TALKER_RATE 38400  // Baudrate for the talker
+#define TALKER_PORT 50     // SoftSerial port 2
 
 
 //*** Some conversion factors
@@ -152,7 +140,7 @@ Credit:
 //*** characters $ or ! and the checksum character *, the checksum
 //*** AND last but not least the <CR><LF> chacters.
 //*** we define one more for the terminating '\0' character for char buffers
-#define NMEA_BUFFER_SIZE 83 // According NEA0183 specs the max char is 82
+#define NMEA_BUFFER_SIZE 82 // According NEA0183 specs the max char is 82
 #define NMEA_TERMINATOR "\r\n"
 
 //*** The maximum number of fields in an NMEA string
@@ -164,29 +152,34 @@ Credit:
 
 #define TALKER_ID "AO"
 #define VARIATION "1.57,E" //Varition in Lemmer on 12-05-2020, change 0.11 per year
+//*** On my boat there is an ofsett of 0.2V between the battery monitor and what 
+//*** is measured by the Robertson Databox
+#define BATTERY_OFFSET 0.2 //Volts
 //*** define NMEA tags to be used
 //*** make sure you know your Talker ID used in the sentences
 //*** In my case next to GP for navigation related sentences
 //*** II is used for Integrated Instruments and
 //*** PS is used for vendor specific tags like Stowe Marine
 //*** AO is used for my Andruino generated sentences
-#define _GLL "$GPGLL"   // Geographic Position  Latitude/Longitude
-#define _GGA "$GPGGA"   // GPS Fix Data. Time, Position and fix related data for a GPS receiver
-#define _GSA "$GPGSA"   // GPS DOP and active satellites
-#define _GSV "$GPGSV"   // Satellites in view
+
+/* for lab testing with an NMEA simulator tool
 #define _DBK "$SDDBK"   // Depth below keel
 #define _DBS "$SDDBS"   // Depth below surface
 #define _DBT "$SDDBT"   // Depth below transducer
+*/
+#define _DBK "$IIDBK"   // Depth below keel
+#define _DBS "$IIDBS"   // Depth below surface
+#define _DBT "$IIDBT"   // Depth below transducer
 #define _HDG "$IIHDG"   // Heading  Deviation & Variation
 #define _HDM "$IIHDM"   // Heading Magnetic
 #define _HDT "$IIHDT"  // Heading True
 #define _MWD "$IIMWD"  // Wind Direction & Speed
 #define _MTW "$IIMTW"  // Water Temperature
+/* for lab testing with an NMEA simulator tool
 #define _MWV "$WIMWV"  // Wind Speed and Angle
-#define _RMA "$GPRMA"  // Recommended Minimum Navigation Information
-#define _RMB "$GPRMB"  // Recommended Minimum Navigation Information
-#define _RMC "$GPRMC"  // Recommended Minimum Navigation Information
-#define _ROT "IIROT"  // Rate of Turn
+*/
+#define _MWV "$IIMWV"  // Wind Speed and Angle
+#define _ROT "$IIROT"  // Rate of Turn
 #define _RPM "$IIRPM"  // Revolutions
 #define _RSA "$IIRSA"  // Rudder sensor angle
 #define _VDR "$IIVDR"  // Set and Drift
@@ -198,6 +191,15 @@ Credit:
 #define _XTE "$IIXTE"  //  Cross-Track Error  Measured
 #define _XTR "$IIXTR"  //  Cross Track Error  Dead Reckoning
 #define _ZDA "$IIZDA"  //  Time & Date - UTC, day, month, year and local time zone
+//*** Some specific GPS sentences
+#define _GLL "$GPGLL"   // Geographic Position  Latitude/Longitude
+#define _GGA "$GPGGA"   // GPS Fix Data. Time, Position and fix related data for a GPS receiver
+#define _GSA "$GPGSA"   // GPS DOP and active satellites
+#define _GSV "$GPGSV"   // Satellites in view
+#define _RMA "$GPRMA"  // Recommended Minimum Navigation Information
+#define _RMB "$GPRMB"  // Recommended Minimum Navigation Information
+#define _RMC "$GPRMC"  // Recommended Minimum Navigation Information
+
 //*** Some specific Robertson / Stowe Marine tags below
 #define _TON "$PSTON"  // Distance Nautical since reset
 #define _TOE "$PSTOE"  // Engine hours
@@ -237,17 +239,16 @@ typedef struct {
 
 }NMEAData ;
 
-char nmeaBuffer[NMEA_BUFFER_SIZE]={0};
+char nmeaBuffer[NMEA_BUFFER_SIZE+1]={0};
 
 enum NMEAReceiveStatus { INVALID, VALID, RECEIVING, CHECKSUMMING, TERMINATING, NMEA_READY};
 byte nmeaStatus = INVALID;
 byte nmeaIndex=0;
 bool nmeaDataReady = false;
 
-/* the below option false is tested with an NMEAsimulator via an USB to Serial hw 
-connection to the Arduino and is working in this setting.
-*/
-SoftwareSerial nmeaSerial(LISTENER_PORT,51, false);
+
+SoftwareSerial nmeaSerialOut(52,TALKER_PORT,true); // signal need to be inverted for RS-232
+
 /*
 TFT screen specific definitions go here
 */
@@ -300,7 +301,7 @@ TFT screen specific definitions go here
 #define BUTTON_H  60 //button height
 #define BUTTON_W  110 //button wodth
 #define BUTTON_X  5 // x position of button column
-#define  BUTTON_Y 260 // y position of button column
+#define BUTTON_Y 260 // y position of button column
 
 //if the IC model is known or the modules is unreadable,you can use this constructed function
 LCDWIKI_KBV my_lcd(ILI9486,A3,A2,A1,A0,A4); //model,cs,cd,wr,rd,reset
@@ -324,7 +325,7 @@ enum units { SPEED, DIST, DEGR, MTRS, TEMP, VOLT};
 enum screen_quadrant { Q1, Q2, Q3, Q4 };
 
 //*** a structure to hold the button info
-typedef struct _button_info
+typedef struct
 {
      char button_name[10];
      uint8_t button_name_size;    // the text size i.e. 1,2,...,n based on a 5x8 char
@@ -388,7 +389,7 @@ void screen_println(char *str,uint8_t csize,uint16_t fc, uint16_t bc,boolean mod
 Prints the measured value and it's units + tag combi in one of the quadrants
 */
 void update_display(double val,const char *str, const char *tag,int8_t q){
-  uint16_t x=0,y=0;
+  uint16_t x=0,y=0,s=6;
   // which quadrants needs an update
   switch( q ){
     case Q1:
@@ -410,9 +411,12 @@ void update_display(double val,const char *str, const char *tag,int8_t q){
     default:
     break;
   }
+    // adjust the fontsize for large numbers o fit the screen
+    if( val > 999.9) s=4; 
+    else s=6;
     // print the value
     my_lcd.Set_Text_Mode(false);
-    my_lcd.Set_Text_Size(6);
+    my_lcd.Set_Text_Size(s);
     my_lcd.Set_Text_colour(YELLOW);
     my_lcd.Set_Text_Back_colour(BLACK);
     my_lcd.Print_Number_Float(val,1,x,y,'.',5,' ');
@@ -465,8 +469,8 @@ void show_menu(void)
 float Declination = +1.57;                              // substitute your magnetic declination 
 
 // ----- software timer
-unsigned long Timer1 = 750000L;                         // 500mS loop ... used when sending data to to Processing
-unsigned long Stop1;                                    // Timer1 stops when micros() exceeds this value
+unsigned long Timer1 = 500000L;                         // 500mS loop ... used when sending data to to Processing
+unsigned long Stop1=0;                                  // Has current micros() to check Timer1 difference
 
 // ----- NZ Offsets & Scale-factors
 float
@@ -478,12 +482,13 @@ Mag_x_scale = 1.0247924,
 Mag_y_scale = 0.99078894,
 Mag_z_scale = 0.9853226;
 */
-Mag_x_offset = 1.0,
-Mag_y_offset = 1.0,
-Mag_z_offset = 180,
-Mag_x_scale = 1.0,
-Mag_y_scale = 1.0,
-Mag_z_scale = 1.0;
+//*** Below values as per calibration on June 2nd, 2020
+Mag_x_offset = -268.86,
+Mag_y_offset = 49.53,
+Mag_z_offset = 224.98,
+Mag_x_scale = 0.80,
+Mag_y_scale = 0.77,
+Mag_z_scale = 2.21;
 
  
 /* EEPROM buffer to mag bias and scale factors */
@@ -530,7 +535,10 @@ takes a String as input parameter
 */
 void debugWrite(String debugMsg)
 {
-  
+  #ifdef DEBUG
+  if(debugMsg.length()>1) Serial.println(debugMsg);
+    else Serial.print(debugMsg);
+  #else
   #ifdef DISPLAY_ATTACHED
   int strlen = debugMsg.length();
   char charMsg[strlen];
@@ -538,9 +546,9 @@ void debugWrite(String debugMsg)
     charMsg[i] = debugMsg[i];
   }
     screen_println( charMsg,2,flag_colour,BLACK,false);
-  #else
-    if(debugMsg.length()>1) Serial.println(debugMsg);
-    else Serial.print(debugMsg);
+  
+    
+    #endif
     #endif
 }
 
@@ -745,10 +753,11 @@ NMEAData NMEAParser::nmeaSpecialty( NMEAData nmeaIn )
     if( nmeaIn.fields[0] == _TOB )
     {
       reset();
+      float batt = (nmeaIn.fields[1]).toFloat()+BATTERY_OFFSET;
       nmeaOut.nrOfFields = 5;
       nmeaOut.fields[0] = "$AOXDR";
       nmeaOut.fields[1] ="U";  // the transducer unit
-      nmeaOut.fields[2] = nmeaIn.fields[1];  // the actual measurement value
+      nmeaOut.fields[2] = String(batt,1);  // the actual measurement value
       nmeaOut.fields[3] = nmeaIn.fields[2]; // unit of measure
       nmeaOut.fields[3].toUpperCase();
       nmeaOut.fields[4] ="BATT";
@@ -773,13 +782,14 @@ NMEAData NMEAParser::nmeaSpecialty( NMEAData nmeaIn )
 String NMEAParser::checksum( String str )
 {
   byte cs = 0;
-  for (unsigned int n = 1; n < str.length() - 1; n++)
+  for (unsigned int n = 1; n < str.length(); n++)
   {
-    if ( str[n] != '&' || str[n] != '!' || str[n] != '*' )
+    if ( str[n] != '$' || str[n] != '!' || str[n] != '*' )
     {
       cs ^= str[n];
     }
   }
+
   if (cs < 0x10) return "*0" + String(cs, HEX);
   else return "*"+String(cs, HEX);
 }
@@ -798,7 +808,7 @@ void NMEAParser::parseNMEASentence(String nmeaStr)
   #ifdef DEBUG
     debugWrite(" In te loop to parse for "+String(sentenceLength)+" chars");
     #endif
-  if ( nmeaStr[0] == '$' || nmeaStr[0] == '!' )
+  if ( nmeaStr[0] == '$' || nmeaStr[0] == '!' || nmeaStr[0] == '~' )
   {
     
     //*** parse the fields from the NMEA string
@@ -835,10 +845,12 @@ void NMEAParser::parseNMEASentence(String nmeaStr)
     {
       nmeaData.sentence += checksum( nmeaData.sentence);
     }
-
-    nmeaData.sentence += NMEA_TERMINATOR;
     #ifdef DEBUG
     debugWrite("Parsed : "+nmeaData.sentence );
+    #endif
+    nmeaData.sentence += NMEA_TERMINATOR;
+    #ifdef DEBUG
+    debugWrite("Parsed & terminated: "+nmeaData.sentence );
     #endif
     ptrNMEAStack->push( nmeaData );   //push the struct to the stack for later use; i.e. buffer it
   }
@@ -867,7 +879,7 @@ NMEAData        NmeaData;
   on RX/TX port 2
 */
 void initializeTalker(){
-  Serial2.begin(TALKER_RATE); 
+  nmeaSerialOut.begin(TALKER_RATE); 
   #ifdef DEBUG
   debugWrite( "Talker initialized...");
   #endif
@@ -897,10 +909,12 @@ byte startTalking(){
       outStr =nmeaOut.sentence;
       
 
-      for(int i=0; i< (int) sizeof(outStr); i++){
+      for(int i=0; i< (int) outStr.length(); i++){
         //outChar[i]=outStr[i];
-        Serial2.write( outStr[i]);
+        nmeaSerialOut.write( outStr[i]);
+        
       }
+      
       #ifdef DEBUG
       debugWrite(" Sending :" + outStr );
       #endif
@@ -949,7 +963,7 @@ byte startTalking(){
           }
         }
         */
-        if(nmeaOut.fields[0]== _DBS){
+        if(nmeaOut.fields[0]== _dBK){
           tmpVal=nmeaOut.fields[3].toDouble();
           update_display( tmpVal,screen_units[MTRS],"DPT",Q3);
         }
@@ -981,8 +995,14 @@ byte startTalking(){
     break;
     case LOG:
       default:
+      if( show_flag){
+        // One time instruction for logging when LOG button pressed
+        debugWrite( "Connect a cable to the serial port on" ); 
+        debugWrite("115200 Baud!");
+        show_flag = false;
+      }
       
-      debugWrite( outStr );
+      Serial.print(outStr);
       
     break;
   }
@@ -994,12 +1014,6 @@ byte startTalking(){
   
 
 
- /* sets the sentence in the nmeaData attribute and itself to runnable 
- */
-void setNMEASentence( String _nmeaIn ){
-  NmeaData.sentence = _nmeaIn;
-}
-
 /**********************************************************************************
   Purpose:  Helper class reading NMEA data from the serial port as a part of the multiplexer application
             - Reading NMEA0183 v1.5 data without a checksum,
@@ -1009,15 +1023,16 @@ void setNMEASentence( String _nmeaIn ){
 Cleasr the inputbuffer by reading until empty, since Serial.flush does not this anymore
 */
 void clearNMEAInputBuffer(){
-  while( nmeaSerial.available()>0){
-    nmeaSerial.read();
+  
+  while( Serial2.available()>0){
+    Serial2.read();
   }
 
 }
 
 void initializeListener()
 {
-  nmeaSerial.begin(LISTENER_RATE);
+  Serial2.begin(LISTENER_RATE);
   clearNMEAInputBuffer();
   #ifdef DEBUG
   debugWrite( "Listener initialized...");
@@ -1030,7 +1045,6 @@ void initializeListener()
   to process incomming and complete MNEA sentence
 */
 void decodeNMEAInput(char cIn){
-  
   switch( cIn ){
     case '~':
       // reserved by NMEA
@@ -1072,19 +1086,20 @@ void decodeNMEAInput(char cIn){
     if( nmeaDataReady){
       nmeaDataReady = false;
       
-      //char nmeaOut[nmeaIndex];
-      //memcpy(nmeaOut, nmeaBuffer, nmeaIndex);
-      for(int y=nmeaIndex+1; y<NMEA_BUFFER_SIZE; y++){
+      // Clear the remaining buffer content with '\0'
+      for(int y=nmeaIndex+1; y<NMEA_BUFFER_SIZE+1; y++){
         nmeaBuffer[y]='\0';
       }
       #ifdef DEBUG
-      debugWrite( nmeaOut);
+      debugWrite( nmeaBuffer);
       #endif
       NmeaParser.parseNMEASentence( nmeaBuffer );
-      memset( nmeaBuffer, 0, NMEA_BUFFER_SIZE);
+
+      //clear the NMEAbuffer with 0
+      memset( nmeaBuffer, 0, NMEA_BUFFER_SIZE+1);
       nmeaIndex=0;
     }
-    //clearNMEAInputBuffer();
+    
       break;
   }
 }
@@ -1098,43 +1113,19 @@ void startListening()
     debugWrite("Listening....");
     #endif
   
-  while(  nmeaSerial.available()>0 && nmeaStatus != TERMINATING){
-    decodeNMEAInput( nmeaSerial.read());
+  while(  Serial2.available()>0 && nmeaStatus != TERMINATING){
+    decodeNMEAInput( Serial2.read());
   }
   
   
 }
 
 
-int keyboardListener()
-{
-  int c = 0;
-  #ifdef DEBUG
-  while(Serial.available()){
-    
-    c = Serial.read();
-    debugWrite("Character(s) received------------------------------");
-    debugWrite( String(c));
-    debugWrite("################################################");
-    
-  
-  }
-  #endif
-  return c;
-}
+
 /*
  * Below the MPU related functions
  */
 
-
-
-/* Bound angle between 0 and 360 */
-float constrainAngle360(float dta) {
-  dta = fmod(dta, 2.0 * PI);
-  if (dta < 0.0)
-    dta += 2.0 * PI;
-  return dta;
-}
 
 void initializeMPU(){
   /* Serial for displaying results */
@@ -1229,6 +1220,7 @@ void initializeMPU(){
       imu.getGres();      // dps
       imu.getMres();      // milli-Gauss 14-bit|16-bit
 
+      
       #ifdef DEBUG
       // ---- display sensor scale multipliers
       debugWrite("Sensor-scale multipliers");
@@ -1401,7 +1393,13 @@ void sampleMPU(){
                     * *(getQ() + 1) - * (getQ() + 2) * *(getQ() + 2) - * (getQ() + 3) * *(getQ() + 3));
   
   
-  
+  #ifdef TEST
+  Serial.print(imu.pitch);
+  Serial.print("\t");
+  Serial.print(imu.roll);
+  Serial.print("\t");
+  Serial.println(imu.yaw);
+  #endif
   
 }
 
@@ -1481,16 +1479,16 @@ void readIMUSensor(){
 #ifdef TEST
 
 String NmeaStream[10] ={
-  "$IIVWR,151,R,02.4,N,,,,\r\n",
-  "$IIMTW,12.2,C\r\n",
-  "!AIVDM,1,1,,A,13aL<mhP000J9:PN?<jf4?vLP88B,0*2B\r\n",
-  "$IIDBK,A,0014.4,f,,,,\r\n",
-  "$IIVLW,1149.1,N,001.07,N\r\n",
-  "$GPGLL,5251.3091,N,00541.8037,E,151314.000,A,D*5B\r\n",
-  "$GPRMC,095218.000,A,5251.5621,N,00540.8482,E,4.25,201.77,120420,,,D*6D\r\n",
-  "$PSTOB,13.0,v\r\n",
-  "$IIVWR,151,R,02.3,N,,,,\r\n",
-  "$IIVHW,,,000,M,01.57,N,,\r\n"
+  "$IIVWR,151,R,02.4,N,,,,",
+  "$IIMTW,12.2,C",
+  "!AIVDM,1,1,,A,13aL<mhP000J9:PN?<jf4?vLP88B,0*2B",
+  "$IIDBK,A,0014.4,f,,,,",
+  "$IIVLW,1149.1,N,001.07,N",
+  "$GPGLL,5251.3091,N,00541.8037,E,151314.000,A,D*5B",
+  "$GPRMC,095218.000,A,5251.5621,N,00540.8482,E,4.25,201.77,120420,,,D*6D",
+  "$PSTOB,13.0,v",
+  "$IIVWR,151,R,02.3,N,,,,",
+  "$IIVHW,,,000,M,01.57,N,,"
   };
 
  int softIndex = 0;
@@ -1518,15 +1516,9 @@ void runSoftGenerator()
       
         
       NmeaParser.parseNMEASentence(NmeaStream[softIndex++]);
-      /*
-      if(Serial2.availableForWrite()){
-      for(uint16_t c=0; c< (NmeaStream[softIndex]).length(); c++){
-        Serial2.write((NmeaStream[softIndex]).charAt(c));
-      }
-      }
-      */
-      delay(20);
-      softIndex++;
+      
+      delay(200);
+      
       } else softIndex=0;
   
  // }
@@ -1544,17 +1536,17 @@ void buttonPressed(){
   
   if (p.z > ts.pressureThreshhold) {
   
-    //p.x = my_lcd.Get_Display_Width()-map(p.x, TS_MINX, TS_MAXX, my_lcd.Get_Display_Width(), 0);
-    //p.y = my_lcd.Get_Display_Height()-map(p.y, TS_MINY, TS_MAXY, my_lcd.Get_Display_Height(), 0);
     pt = p;
     p.y = map(pt.x, TS_MINX, TS_MAXX, my_lcd.Get_Display_Height(),0);
     p.x = map(pt.y, TS_MINY, TS_MAXY, my_lcd.Get_Display_Width(),0);
-  //debugWrite( "x= "+String(p.x)+"y = "+String(p.y)+" z= "+String(p.z)+" treshold= "+String(ts.pressureThreshhold));
+  
     if(p.y> BUTTON_Y && p.y<(BUTTON_Y+BUTTON_H)){
       if(p.x>(2*(BUTTON_X+BUTTON_W))){
         //button ALL or LOG pressed
-        if(p.x>(3*(BUTTON_X+BUTTON_W))) active_menu_button = LOG;
-        else active_menu_button = ALL;
+        if(p.x>(3*(BUTTON_X+BUTTON_W))) {
+          active_menu_button = LOG;
+          show_flag = true;  
+        } else active_menu_button = ALL;
       }else if( p.x<(BUTTON_X+BUTTON_W)) active_menu_button=SPD;
       else active_menu_button = CRS;
       
@@ -1604,12 +1596,15 @@ void setup() {
   show_menu();
   #endif
   // ----- start software timer
-  Stop1 = micros() + Timer1; 
+  //Stop1 = micros() + Timer1; 
+  Stop1 = micros();
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
-  //sampleMPU(); 
+  #ifdef MPU_ATTACHED
+  sampleMPU(); 
+  #endif
   #ifdef TEST
   runSoftGenerator();
   #endif
@@ -1617,19 +1612,20 @@ void loop() {
   //*** peridically read the MPU sensor and
   //*** generate NMEA data
   #ifdef MPU_ATTACHED
- if (micros() > Stop1)
+ if ( (micros() - Stop1)>Timer1 )
   {
-    Stop1 += Timer1;                                    // Reset timer
+    Stop1 = micros();// + Timer1;                                    // Reset timer
 
-    //readIMUSensor(); 
+    readIMUSensor(); 
   }
   #endif
   startListening();
-
+ 
   #ifdef DISPLAY_ATTACHED
   buttonPressed();
   #endif
-
+ 
   startTalking();
+  
 }
 
