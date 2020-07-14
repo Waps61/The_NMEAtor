@@ -3,10 +3,13 @@
   Project:  Yazz_Multiplexer.ino, Copyright 2020, Roy Wassili
   Contact:  waps61 @gmail.com
   URL:      https://www.hackster.io/waps61
+  VERSION:  1.0
   Date:     30-04-2020
   Last
-  Update:   06-06-2020
-  Achieved: Successful 2nd FAT on board. This software now reads NMEA data  incomming on
+  Update:   10-07-2020
+            Due to calibration of the MPU9255 icw the Mega 256 the unit is (temporarely) disabled 
+            using compiler directive MPU_ATTACHED. Related libraries outcommented
+  Achieved: 06-06-2020:Successful 2nd FAT on board. This software now reads NMEA data  incomming on
             Rx2 and sends data to a external multiplexer via Pin 50 (and inverted) via SoftSerial
             
   Purpose:  Build an NMEA0183 manupulator and animator for on board of my sailing boat
@@ -99,9 +102,10 @@ Credit:
 
 #include <Wire.h>
 //#include <EEPROM.h>
+/* MPU temporarely diables due to calibration issues
 #include "quaternionFilters.h"
 #include <MPU9250.h>  
-
+*/
 #include <LCDWIKI_GUI.h>
 #include <LCDWIKI_KBV.h>
 #include <TouchScreen.h>
@@ -110,17 +114,22 @@ Credit:
 //*** a digital input is used as a software serial port because
 //*** it can invert te signal back to its orignal pulse set
 #include <SoftwareSerial.h>
+
+
 /*
    Definitions go here
 */
-#define VESSEL_NAME "YAZZ"
 // *** Conditional Debug & Test Info to Serial Monitor
 // *** by commenting out the line(s) below the debugger and or test statements will 
 // *** be ommitted from the code
 //#define DEBUG 1
 //#define TEST 1
 #define DISPLAY_ATTACHED 1
-//#define MPU_ATTACHED 1
+//#define MPU_ATTACHED 1  temprarely detached due to calibration issues
+
+#define VESSEL_NAME "YAZZ"
+#define PROGRAM_NAME "NMEAtor"
+#define PROGRAM_VERSION "1.0"
 
 #define SAMPLERATE 115200
 
@@ -347,6 +356,87 @@ button_info menu_button[4] =
   "Log",3,BLACK,LIGHTGREY,BUTTON_X+(3*(BUTTON_W+BUTTON_X)),BUTTON_Y, 
 };
 
+
+#ifdef MPU_ATTACHED
+/* 
+ *  MPU specific defenitions go here
+ */
+#define I2Cclock 400000                                 // I2C clock is 400 kilobits/s
+#define I2Cport Wire                                    // I2C using Wire library
+#define MPU9250_ADDRESS MPU9250_ADDRESS_AD0             // MPU9250 address when ADO = 0 (0x68)  
+#define True_North false                                // change this to "true" for True North                
+float Declination = +1.57;                              // substitute your magnetic declination 
+
+// ----- software timer
+unsigned long Timer1 = 500000L;                         // 500mS loop ... used when sending data to to Processing
+unsigned long Stop1=0;                                  // Has current micros() to check Timer1 difference
+
+// ----- NZ Offsets & Scale-factors
+float
+/*
+Mag_x_offset = -34.560013,
+Mag_y_offset = 528.885,
+Mag_z_offset = -125.259995,
+Mag_x_scale = 1.0247924,
+Mag_y_scale = 0.99078894,
+Mag_z_scale = 0.9853226;
+*/
+//*** Below values as per calibration on June 2nd, 2020
+/*
+Mag_x_offset = -268.86,
+Mag_y_offset = 49.53,
+Mag_z_offset = 224.98,
+Mag_x_scale = 0.80,
+Mag_y_scale = 0.77,
+Mag_z_scale = 2.21;
+*/
+// --- Lemmer offset & scale Jun 7, 2020
+Mag_x_offset = 99.05,
+Mag_y_offset = 417.44,
+Mag_z_offset = 354.51,
+Mag_x_scale = 1.04,
+Mag_y_scale = 1.00,
+Mag_z_scale = 0.97;
+ 
+/* EEPROM buffer to mag bias and scale factors */
+uint8_t eeprom_buffer[24];
+float calValue;
+
+
+/* MPU 9250 object */
+MPU9250 imu(MPU9250_ADDRESS, I2Cport, I2Cclock);      // Create imu instance using I2C at 400 kilobits/s
+#endif
+
+bool on = true;
+byte pin = 22;
+
+//*** flag data on the mpu port is ready
+volatile bool mpuDataReady = false;
+
+//*** ISR to set mpuDataReady flag
+void mpuReady(){
+  mpuDataReady = true;
+}
+
+bool mpuNeedsCalibration = true;
+String mpuNMEAString = "";
+
+/*
+ * End MPU specific definitions
+ */
+
+ /*
+  * Setting fro Serial interrup
+  */
+//*** flag data on the listener port is ready
+volatile bool listenerDataReady = false;
+
+//*** ISR to set listerDataReady flag
+void listenerReady(){
+  listenerDataReady = true;
+}
+
+
 /* 
   puts a string in a foreground/background color on position x,y
 */
@@ -430,7 +520,7 @@ void update_display(double val,const char *str, const char *tag,int8_t q){
 /*
 Show the menu as a row of 4 buttons on the lower part of the display
 */
-void show_menu(void)
+void show_menu()
 {
     int i;
     uint16_t c=RED;
@@ -456,76 +546,47 @@ void show_menu(void)
    }
 }
 
-
-
-
-/* 
- *  MPU specific defenitions go here
- */
-#define I2Cclock 400000                                 // I2C clock is 400 kilobits/s
-#define I2Cport Wire                                    // I2C using Wire library
-#define MPU9250_ADDRESS MPU9250_ADDRESS_AD0             // MPU9250 address when ADO = 0 (0x68)  
-#define True_North false                                // change this to "true" for True North                
-float Declination = +1.57;                              // substitute your magnetic declination 
-
-// ----- software timer
-unsigned long Timer1 = 500000L;                         // 500mS loop ... used when sending data to to Processing
-unsigned long Stop1=0;                                  // Has current micros() to check Timer1 difference
-
-// ----- NZ Offsets & Scale-factors
-float
-/*
-Mag_x_offset = -34.560013,
-Mag_y_offset = 528.885,
-Mag_z_offset = -125.259995,
-Mag_x_scale = 1.0247924,
-Mag_y_scale = 0.99078894,
-Mag_z_scale = 0.9853226;
-*/
-//*** Below values as per calibration on June 2nd, 2020
-Mag_x_offset = -268.86,
-Mag_y_offset = 49.53,
-Mag_z_offset = 224.98,
-Mag_x_scale = 0.80,
-Mag_y_scale = 0.77,
-Mag_z_scale = 2.21;
-
- 
-/* EEPROM buffer to mag bias and scale factors */
-uint8_t eeprom_buffer[24];
-float calValue;
-
-/* MPU 9250 object */
-MPU9250 imu(MPU9250_ADDRESS, I2Cport, I2Cclock);      // Create imu instance using I2C at 400 kilobits/s
-
-
-bool on = true;
-byte pin = 22;
-
-//*** flag data on the mpu port is ready
-volatile bool mpuDataReady = false;
-
-//*** ISR to set mpuDataReady flag
-void mpuReady(){
-  mpuDataReady = true;
-}
-
-bool mpuNeedsCalibration = true;
-String mpuNMEAString = "";
-
-/*
- * End MPU specific definitions
- */
-
- /*
-  * Setting fro Serial interrup
-  */
-//*** flag data on the listener port is ready
-volatile bool listenerDataReady = false;
-
-//*** ISR to set listerDataReady flag
-void listenerReady(){
-  listenerDataReady = true;
+void buttonPressed(){
+  TSPoint pt, p = ts.getPoint();
+  uint8_t prev_button = active_menu_button;
+  pinMode(XM, OUTPUT);
+  pinMode(YP, OUTPUT);
+  //if (p.z > MINPRESSURE && p.z < MAXPRESSURE)
+  
+  if (p.z > ts.pressureThreshhold) {
+  
+    pt = p;
+    p.y = map(pt.x, TS_MINX, TS_MAXX, my_lcd.Get_Display_Height(),0);
+    p.x = map(pt.y, TS_MINY, TS_MAXY, my_lcd.Get_Display_Width(),0);
+  
+    if(p.y> BUTTON_Y && p.y<(BUTTON_Y+BUTTON_H)){
+      if(p.x>(2*(BUTTON_X+BUTTON_W))){
+        //button ALL or LOG pressed
+        if(p.x>(3*(BUTTON_X+BUTTON_W))) {
+          active_menu_button = LOG;
+          show_flag = true;  
+        } else active_menu_button = ALL;
+      }else if( p.x<(BUTTON_X+BUTTON_W)) active_menu_button=SPD;
+      else active_menu_button = CRS;
+      
+      show_string(menu_button[prev_button].button_name,
+                  menu_button[prev_button].button_x+5,
+                  menu_button[prev_button].button_y+13,
+                  menu_button[prev_button].button_name_size,
+                  menu_button[prev_button].button_name_colour,
+                  menu_button[prev_button].button_colour,
+                  true);
+       show_string(menu_button[active_menu_button].button_name,
+                  menu_button[active_menu_button].button_x+5,
+                  menu_button[active_menu_button].button_y+13,
+                  menu_button[active_menu_button].button_name_size,
+                  RED,
+                  menu_button[active_menu_button].button_colour,
+                  true);     
+      wipe_screen();      
+    }
+  }
+  
 }
 
 
@@ -956,7 +1017,7 @@ byte startTalking(){
             tmpVal=nmeaOut.fields[2].toDouble();
             update_display( tmpVal,screen_units[DEGR],"PITCH",Q3);
           }
-          //*** if we found PITCH we also have ROLL
+          //if we found PITCH we also have ROLL
           if(nmeaOut.fields[8]== "ROLL"){
             tmpVal=nmeaOut.fields[6].toDouble();
             update_display( tmpVal,screen_units[DEGR],"ROLL",Q4);
@@ -999,6 +1060,7 @@ byte startTalking(){
         // One time instruction for logging when LOG button pressed
         debugWrite( "Connect a cable to the serial port on" ); 
         debugWrite("115200 Baud!");
+        debugWrite( String(PROGRAM_NAME)+" "+String(PROGRAM_VERSION));
         show_flag = false;
       }
       
@@ -1051,6 +1113,7 @@ void decodeNMEAInput(char cIn){
     case '!':
     case '$':
       nmeaStatus = RECEIVING;
+      nmeaIndex=0;
       break;
     case '*':
       if(nmeaStatus==RECEIVING){
@@ -1062,12 +1125,11 @@ void decodeNMEAInput(char cIn){
       // in old v1.5 version, NMEA Data may not be checksummed!
       if(nmeaStatus== RECEIVING || nmeaStatus==CHECKSUMMING){
         nmeaDataReady = true;
-      }
-      nmeaStatus = TERMINATING;
-      break;
-    default:
+        nmeaStatus = TERMINATING;
+      } else nmeaStatus = INVALID;
       
       break;
+    
   }
   switch(nmeaStatus){
     case INVALID:
@@ -1105,7 +1167,7 @@ void decodeNMEAInput(char cIn){
 }
 
 /*
- * tart listeneing for incomming NNMEA sentence
+ * Start listeneing for incomming NNMEA sentences
  */
 void startListening()
 {
@@ -1126,7 +1188,7 @@ void startListening()
  * Below the MPU related functions
  */
 
-
+#ifdef MPU_ATTACHED
 void initializeMPU(){
   /* Serial for displaying results */
   #ifdef DEBUG
@@ -1472,6 +1534,7 @@ void readIMUSensor(){
   NmeaParser.parseNMEASentence( mpuNMEAString );
   startTalking();
 }
+#endif
 /*
  * End MPU related functions
  */
@@ -1527,58 +1590,24 @@ void runSoftGenerator()
 
 #endif
 
-void buttonPressed(){
-  TSPoint pt, p = ts.getPoint();
-  uint8_t prev_button = active_menu_button;
-  pinMode(XM, OUTPUT);
-  pinMode(YP, OUTPUT);
-  //if (p.z > MINPRESSURE && p.z < MAXPRESSURE)
-  
-  if (p.z > ts.pressureThreshhold) {
-  
-    pt = p;
-    p.y = map(pt.x, TS_MINX, TS_MAXX, my_lcd.Get_Display_Height(),0);
-    p.x = map(pt.y, TS_MINY, TS_MAXY, my_lcd.Get_Display_Width(),0);
-  
-    if(p.y> BUTTON_Y && p.y<(BUTTON_Y+BUTTON_H)){
-      if(p.x>(2*(BUTTON_X+BUTTON_W))){
-        //button ALL or LOG pressed
-        if(p.x>(3*(BUTTON_X+BUTTON_W))) {
-          active_menu_button = LOG;
-          show_flag = true;  
-        } else active_menu_button = ALL;
-      }else if( p.x<(BUTTON_X+BUTTON_W)) active_menu_button=SPD;
-      else active_menu_button = CRS;
-      
-      show_string(menu_button[prev_button].button_name,
-                  menu_button[prev_button].button_x+5,
-                  menu_button[prev_button].button_y+13,
-                  menu_button[prev_button].button_name_size,
-                  menu_button[prev_button].button_name_colour,
-                  menu_button[prev_button].button_colour,
-                  true);
-       show_string(menu_button[active_menu_button].button_name,
-                  menu_button[active_menu_button].button_x+5,
-                  menu_button[active_menu_button].button_y+13,
-                  menu_button[active_menu_button].button_name_size,
-                  RED,
-                  menu_button[active_menu_button].button_colour,
-                  true);     
-      wipe_screen();      
-    }
-  }
-  
-}
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(SAMPLERATE);
   #ifdef DISPLAY_ATTACHED
   my_lcd.Set_Rotation(1); //Landscape
+  // set brightness
+  //my_lcd.Write_Cmd_Data(0x51, 0x01);
   my_lcd.Init_LCD();
   my_lcd.Fill_Screen(BLACK); 
   char vessel_name[] = VESSEL_NAME;
+  char program_name[] = PROGRAM_NAME;
+  char program_version[] = PROGRAM_VERSION;
   show_string(  vessel_name,CENTER,132,8,RED,BLACK,false);
+  show_string( program_name, CENTER, 195,2,WHITE,BLACK,false);
+  show_string( program_version, CENTER,215,2,WHITE,BLACK,false);
   flag_colour = YELLOW;
+  
   #endif
 
   #ifdef MPU_ATTACHED
@@ -1595,9 +1624,12 @@ void setup() {
   #ifdef DISPLAY_ATTACHED
   show_menu();
   #endif
+
+  #ifdef MPU_ATTACHED
   // ----- start software timer
   //Stop1 = micros() + Timer1; 
   Stop1 = micros();
+  #endif
 }
 
 void loop() {
