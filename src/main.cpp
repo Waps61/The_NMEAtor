@@ -3,10 +3,17 @@
   Project:  Yazz_Multiplexer.ino, Copyright 2020, Roy Wassili
   Contact:  waps61 @gmail.com
   URL:      https://www.hackster.io/waps61
-  VERSION:  1.0
+  VERSION:  1.03
   Date:     30-04-2020
   Last
-  Update:   10-07-2020
+  Update:   09-08-2020 v 1.03
+            TZ iBoat app does not recognize DBT so changed to DPT
+            22-07-2020 v 1.02
+            Code optiized and cleaned up. Removed dead code
+            21-07-20 v1.01
+            Some values are checked for values <100 (or 360 for degrees)before printd on screen, 
+            because bigger values are non existant but do show up some times.
+            10-07-2020
             Due to calibration of the MPU9255 icw the Mega 256 the unit is (temporarely) disabled 
             using compiler directive MPU_ATTACHED. Related libraries outcommented
   Achieved: 06-06-2020:Successful 2nd FAT on board. This software now reads NMEA data  incomming on
@@ -91,7 +98,7 @@ Warning:
 Do NOT use this compass in situations involving safety to life
 such as navigation at sea.  
         
-TODO: 
+TODO: Investigate programm stall; either due to lack of memory of dropping signal voltages on board
 
 Credit:   
 */
@@ -129,7 +136,7 @@ Credit:
 
 #define VESSEL_NAME "YAZZ"
 #define PROGRAM_NAME "NMEAtor"
-#define PROGRAM_VERSION "1.0"
+#define PROGRAM_VERSION "1.03"
 
 #define SAMPLERATE 115200
 
@@ -157,7 +164,7 @@ Credit:
 //***  the Meteorological Composite sentence
 #define MAX_NMEA_FIELDS 21
 
-#define STACKSIZE 10  // Size of the stack; adjust according use
+#define STACKSIZE 5  // Size of the stack; adjust according use
 
 #define TALKER_ID "AO"
 #define VARIATION "1.57,E" //Varition in Lemmer on 12-05-2020, change 0.11 per year
@@ -216,7 +223,7 @@ Credit:
 #define _TOD "$PSTOD"  // depth transducer below waterline in feet
 //*** Arduino generated TAGS
 #define _xDR "$" TALKER_ID "" "XDR" // Arduino Transducer measurement
-#define _dBK "$" TALKER_ID "" "DBK" // Arduino Transducer measurement
+#define _dPT "$" TALKER_ID "" "DPT" // Arduino Transducer measurement
 #define _hDG "$" TALKER_ID "" "HDG" // Arduino Transducer measurement
 /* SPECIAL NOTE:
   XDR - Transducer Measurement
@@ -258,6 +265,22 @@ bool nmeaDataReady = false;
 
 SoftwareSerial nmeaSerialOut(52,TALKER_PORT,true); // signal need to be inverted for RS-232
 
+
+/* freeMem function with varibles*/
+extern unsigned int __bss_end;
+extern unsigned int __heap_start;
+extern void *__brkval;
+
+uint16_t getFreeSram() {
+  uint8_t newVariable;
+  // heap is empty, use bss as start memory address
+  if ((uint16_t)__brkval == 0)
+    return (((uint16_t)&newVariable) - ((uint16_t)&__bss_end));
+  // use heap end as the start of the memory address
+  else
+    return (((uint16_t)&newVariable) - ((uint16_t)__brkval));
+};
+/* end freeMem function */
 /*
 TFT screen specific definitions go here
 */
@@ -326,8 +349,9 @@ int16_t screen_row = 0;
 
 //*** Define the units of measurement in a string pointer array 
 //*** and use an enum to get the index for the specific label
-const char *screen_units[]={"Kts","NM","Deg","M","C","V"};
-enum units { SPEED, DIST, DEGR, MTRS, TEMP, VOLT};
+//*** DEG is used for degrees and DEG< and DEG> for left and right indicators
+const char *screen_units[]={"Kts","NM","DEG","DEG<","DEG>","M","C","V"};
+enum units { SPEED, DIST, DEG, DEGR, DEGL,MTRS, TEMP, VOLT};
 //*** the screen is divided in 4 quadrants
 //***   Q1      Q2
 //***   Q3      Q4
@@ -345,18 +369,20 @@ typedef struct
  }button_info;
 
 //*** define the buttons used with an enumerated tag
-enum menu_buttons { SPD, CRS, ALL, LOG};
+enum menu_buttons { SPD, CRS, LOG, MEM};
 uint8_t active_menu_button = SPD; //holds the active menu button pressed
 //*** the definition of buttons menu
 button_info menu_button[4] = 
 {
   "Speed",3,BLACK,LIGHTGREY,BUTTON_X,BUTTON_Y,
   "Crs",3,BLACK,LIGHTGREY,BUTTON_X+(1*(BUTTON_W+BUTTON_X)),BUTTON_Y,
-  "All",3,BLACK,LIGHTGREY,BUTTON_X+(2*(BUTTON_W+BUTTON_X)),BUTTON_Y,
-  "Log",3,BLACK,LIGHTGREY,BUTTON_X+(3*(BUTTON_W+BUTTON_X)),BUTTON_Y, 
+  "Log",3,BLACK,LIGHTGREY,BUTTON_X+(2*(BUTTON_W+BUTTON_X)),BUTTON_Y,
+  "Mem",3,BLACK,LIGHTGREY,BUTTON_X+(3*(BUTTON_W+BUTTON_X)),BUTTON_Y, 
 };
 
-
+// ----- software timer
+unsigned long Timer2 = 1000000;//500000L;                         // 500mS loop ... used when sending data to to Processing
+unsigned long Stop2=0;   
 #ifdef MPU_ATTACHED
 /* 
  *  MPU specific defenitions go here
@@ -367,9 +393,7 @@ button_info menu_button[4] =
 #define True_North false                                // change this to "true" for True North                
 float Declination = +1.57;                              // substitute your magnetic declination 
 
-// ----- software timer
-unsigned long Timer1 = 500000L;                         // 500mS loop ... used when sending data to to Processing
-unsigned long Stop1=0;                                  // Has current micros() to check Timer1 difference
+                                // Has current micros() to check Timer1 difference
 
 // ----- NZ Offsets & Scale-factors
 float
@@ -503,6 +527,9 @@ void update_display(double val,const char *str, const char *tag,int8_t q){
   }
     // adjust the fontsize for large numbers o fit the screen
     if( val > 999.9) s=4; 
+    else if(val>9999.9) s=3;
+    else if(val>99999.9) s=2;
+    else if(val>999999.9) s=1;
     else s=6;
     // print the value
     my_lcd.Set_Text_Mode(false);
@@ -561,11 +588,11 @@ void buttonPressed(){
   
     if(p.y> BUTTON_Y && p.y<(BUTTON_Y+BUTTON_H)){
       if(p.x>(2*(BUTTON_X+BUTTON_W))){
-        //button ALL or LOG pressed
+        //button LOG or MEM pressed
         if(p.x>(3*(BUTTON_X+BUTTON_W))) {
-          active_menu_button = LOG;
+          active_menu_button = MEM;
           show_flag = true;  
-        } else active_menu_button = ALL;
+        } else active_menu_button = LOG;
       }else if( p.x<(BUTTON_X+BUTTON_W)) active_menu_button=SPD;
       else active_menu_button = CRS;
       
@@ -601,12 +628,10 @@ void debugWrite(String debugMsg)
     else Serial.print(debugMsg);
   #else
   #ifdef DISPLAY_ATTACHED
-  int strlen = debugMsg.length();
-  char charMsg[strlen];
-  for(int i; i<strlen; i++){
-    charMsg[i] = debugMsg[i];
-  }
-    screen_println( charMsg,2,flag_colour,BLACK,false);
+  int str_len = debugMsg.length();
+  char charMsg[str_len];
+  debugMsg.toCharArray(charMsg, str_len);
+  screen_println( charMsg,2,flag_colour,BLACK,false);
   
     
     #endif
@@ -706,10 +731,11 @@ class NMEAParser
 {
  public:
     NMEAParser(NMEAStack *_ptrNMEAStack);
-    void setSentence( String _nmeaSentence);
-    void parseNMEASentence(String nmeaIn ); // parse an NMEA sentence with each part stored in the array
-    NMEAData getNMEAData(); // getter function to get the NMEADAta struct
     
+    void parseNMEASentence(String nmeaIn ); // parse an NMEA sentence with each part stored in the array
+    
+    unsigned long getCounter(); //return nr of sentences parsed since switched on
+
   private:
     NMEAStack *ptrNMEAStack;
     String NMEAFilter = NMEA_SPECIALTY;
@@ -718,6 +744,7 @@ class NMEAParser
     void reset(); // clears the nmeaData struct;
     String checksum( String str ); //calculate the checksum for str
     NMEAData nmeaSpecialty( NMEAData nmeaIn ); // special treatment function
+    unsigned long counter=0;
 };
 
 // ***
@@ -744,22 +771,13 @@ void NMEAParser::reset(){
   current_color=WHITE;
 }
 
-void NMEAParser::setSentence( String _nmeaSentence)
-{
-  #ifdef DEBUG
-  debugWrite( "NMEA received "+String( _nmeaSentence) );
-  #endif
-  nmeaSentence = _nmeaSentence;
-}
-
 /*
 
 */
 NMEAData NMEAParser::nmeaSpecialty( NMEAData nmeaIn )
 {
   String filter = NMEA_SPECIALTY;
-  String sentence = nmeaIn.sentence;
-  String newSentence ="";
+  
   NMEAData nmeaOut ;//= nmeaIn;
   #ifdef DEBUG
   debugWrite( " Specialty found... for filter"+filter);
@@ -771,6 +789,7 @@ NMEAData NMEAParser::nmeaSpecialty( NMEAData nmeaIn )
        to be converted to compliant sentences
     */
     //*** $IIDBK is not NMEA0183 compliant and needs conversion
+    //*** Since DBK/DBS sentences are obsolete DBT is used 
     if ( nmeaIn.fields[0] == _DBK ) {
       #ifdef DEBUG
       debugWrite("Found "+String(_DBK));
@@ -780,18 +799,31 @@ NMEAData NMEAParser::nmeaSpecialty( NMEAData nmeaIn )
       // Char A can also be a V if invalid and shoul be removed
       // All fields after the tag shift 1 position to the left
       // Since we modify the sentence we'll also put our talker ID in place
-      nmeaOut.fields[0]="$AODBK";
-      for( int i=1; i<nmeaIn.nrOfFields-2; i++ )
-      {
-        nmeaOut.fields[i] = nmeaIn.fields[i+1];
-      }
-      // We need the the feet  to convert to meters and add to string
-      float ft = nmeaOut.fields[1].toFloat();
-      nmeaOut.fields[3] = String( ft * FTM, 1);
-      nmeaOut.fields[4] = "M";
-      nmeaOut.fields[5] = "";
-      nmeaOut.fields[6] = "";
-      nmeaOut.nrOfFields = 7;
+      
+
+      //*** below coe is for DBT
+      //nmeaOut.fields[0]="$AODPT";
+      // for( int i=1; i<nmeaIn.nrOfFields-2; i++ )
+      // {
+      //   nmeaOut.fields[i] = nmeaIn.fields[i+1];
+      // }
+      // // We need the the feet  to convert to meters and add to string
+      // float ft = nmeaOut.fields[1].toFloat();
+      // nmeaOut.fields[3] = String( ft * FTM, 1);
+      // nmeaOut.fields[4] = "M";
+      // nmeaOut.fields[5] = "";
+      // nmeaOut.fields[6] = "";
+      // nmeaOut.nrOfFields = 7;
+
+      //*** below code is for DPT since TZ iBoat does not use DBT
+      nmeaOut.fields[0]="$AODPT";
+      if(nmeaIn.fields[3]=="f"){
+        //depth in feet need to be converted
+        float ft = nmeaIn.fields[3].toFloat();
+        nmeaOut.fields[1]=String( ft * FTM, 1);
+      } else nmeaOut.fields[1]=nmeaIn.fields[2];
+      nmeaOut.fields[2]="0,0";
+      nmeaOut.nrOfFields=3;
       for( int i=0; i< nmeaOut.nrOfFields ; i++)
       {
         #ifdef DEBUG
@@ -864,7 +896,7 @@ void NMEAParser::parseNMEASentence(String nmeaStr)
   int currentIndex = 0;
   int lastIndex = -1;
   int sentenceLength = nmeaStr.length();
-  String newSentence = "";  // used to construct the new senctence
+  
   //*** check for a valid NMEA sentence
   #ifdef DEBUG
     debugWrite(" In te loop to parse for "+String(sentenceLength)+" chars");
@@ -914,17 +946,15 @@ void NMEAParser::parseNMEASentence(String nmeaStr)
     debugWrite("Parsed & terminated: "+nmeaData.sentence );
     #endif
     ptrNMEAStack->push( nmeaData );   //push the struct to the stack for later use; i.e. buffer it
+    counter++; // for every sentence pushed the counter increments
   }
 
   return;
 }
 
-/*
- * getter function to get the NMEADAta structure
- */
-NMEAData NMEAParser::getNMEAData()
+unsigned long NMEAParser::getCounter()
 {
-  return nmeaData;
+  return counter;
 }
 
 
@@ -954,7 +984,7 @@ void initializeTalker(){
  */
 byte startTalking(){
   NMEAData nmeaOut;
-  String outStr = "";
+  
   
   #ifdef DISPLAY_ATTACHED
   double tmpVal=0.0;
@@ -967,12 +997,12 @@ byte startTalking(){
 
   if( NmeaStack.getIndex()>0 ){
       nmeaOut = NmeaStack.pop();
-      outStr =nmeaOut.sentence;
+      //outStr =nmeaOut.sentence;
       
 
-      for(int i=0; i< (int) outStr.length(); i++){
+      for(int i=0; i< (int) nmeaOut.sentence.length(); i++){
         //outChar[i]=outStr[i];
-        nmeaSerialOut.write( outStr[i]);
+        nmeaSerialOut.write( nmeaOut.sentence[i]);
         
       }
       
@@ -985,31 +1015,33 @@ byte startTalking(){
   switch (active_menu_button){
   
     case SPEED:
+      // speeds are checked for values <100; Higher is non existant
       if(nmeaOut.fields[0]== _RMC){
         tmpVal=nmeaOut.fields[7].toDouble();
-        update_display( tmpVal,screen_units[SPEED],"SOG",Q1);
+        if(tmpVal<100) update_display( tmpVal,screen_units[SPEED],"SOG",Q1);
       }
       if(nmeaOut.fields[0]== _VHW){
         tmpVal=nmeaOut.fields[5].toDouble();
-        update_display( tmpVal,screen_units[SPEED],"STW",Q2);
+        if(tmpVal<100) update_display( tmpVal,screen_units[SPEED],"STW",Q2);
       }
       if(nmeaOut.fields[0]== _VWR){
         tmpVal=nmeaOut.fields[3].toDouble();
-        update_display( tmpVal,screen_units[SPEED],"AWS",Q3);
+        if(tmpVal<100) update_display( tmpVal,screen_units[SPEED],"AWS",Q3);
         tmpVal=nmeaOut.fields[1].toDouble();
-        char tmpChr[(nmeaOut.fields[2].length())];
-        (nmeaOut.fields[2]).toCharArray(tmpChr,nmeaOut.fields[2].length(),0);
-      update_display( tmpVal,screen_units[DEGR],"AWA",Q4);
+        //char tmpChr[(nmeaOut.fields[2].length())];
+        //(nmeaOut.fields[2]).toCharArray(tmpChr,nmeaOut.fields[2].length(),0);
+      if(tmpVal<360 && nmeaOut.fields[2]=="R")update_display( tmpVal,screen_units[DEGR],"AWA",Q4);
+      else if(tmpVal<360 && nmeaOut.fields[2]=="L")update_display( tmpVal,screen_units[DEGL],"AWA",Q4);
       }
     break;
     case CRS:
         if(nmeaOut.fields[0]== _RMC){
         tmpVal=nmeaOut.fields[8].toDouble();
-          update_display( tmpVal,screen_units[DEGR],"TRUE",Q1);
+          if(tmpVal<360)update_display( tmpVal,screen_units[DEG],"TRU",Q1);
         }
         if(nmeaOut.fields[0]== _hDG){
           tmpVal=nmeaOut.fields[1].toDouble();
-          update_display( tmpVal,screen_units[DEGR],"MAG",Q2);
+          if(tmpVal<360)update_display( tmpVal,screen_units[DEG],"MAG",Q2);
         }
         /*
         if(nmeaOut.fields[0]== _xDR ){
@@ -1024,26 +1056,27 @@ byte startTalking(){
           }
         }
         */
-        if(nmeaOut.fields[0]== _dBK){
-          tmpVal=nmeaOut.fields[3].toDouble();
+        if(nmeaOut.fields[0]== _dPT){
+          tmpVal=nmeaOut.fields[1].toDouble();
           update_display( tmpVal,screen_units[MTRS],"DPT",Q3);
         }
         if(nmeaOut.fields[0]== _VLW){
           tmpVal=nmeaOut.fields[3].toDouble();
-          update_display( tmpVal,screen_units[DIST],"TRIP" ,Q4);
+          update_display( tmpVal,screen_units[DIST],"TRP" ,Q4);
         }
         
     break;
-    case ALL:
+    case LOG:
+        // Voltage an Temperature are checked <100; Higher is non exsitant.
         if(nmeaOut.fields[0]== _xDR ){
           if(nmeaOut.fields[4]== "BATT"){
             tmpVal=nmeaOut.fields[2].toDouble();
-            update_display( tmpVal,screen_units[VOLT],"BAT",Q1);
+            if(tmpVal<100) update_display( tmpVal,screen_units[VOLT],"BAT",Q1);
           }
         }
         if(nmeaOut.fields[0]== _MTW){
             tmpVal=nmeaOut.fields[1].toDouble();
-            update_display( tmpVal,screen_units[TEMP],"WTR",Q2);
+            if(tmpVal<100) update_display( tmpVal,screen_units[TEMP],"WTR",Q2);
           }
           if(nmeaOut.fields[0]== _VLW){
             tmpVal=nmeaOut.fields[1].toDouble();
@@ -1054,17 +1087,39 @@ byte startTalking(){
             update_display( tmpVal,screen_units[DIST],"TRP",Q4);
           }
     break;
-    case LOG:
+    case MEM:
       default:
+      if ( (micros() - Stop2)>Timer2 )
+      {
+        Stop2 = micros();// + Timer2;                                    // Reset timer
+
+    
+  
+        tmpVal=getFreeSram();
+        update_display( tmpVal,"Byte","FREE",Q1);
+        
+        tmpVal=0;
+        update_display( tmpVal,"V.",PROGRAM_VERSION,Q2);
+
+        tmpVal=NmeaStack.getIndex();
+        update_display( tmpVal," ","STACK",Q3);
+      
+        
+        tmpVal= NmeaParser.getCounter();
+        update_display(tmpVal,"nr","MSG",Q4);
+      }
+            /*
       if( show_flag){
         // One time instruction for logging when LOG button pressed
         debugWrite( "Connect a cable to the serial port on" ); 
         debugWrite("115200 Baud!");
         debugWrite( String(PROGRAM_NAME)+" "+String(PROGRAM_VERSION));
+        debugWrite("Free SRAM:"+ String(getFreeSram()));
         show_flag = false;
       }
+      */
       
-      Serial.print(outStr);
+      Serial.print(nmeaOut.sentence);
       
     break;
   }
@@ -1111,7 +1166,9 @@ void decodeNMEAInput(char cIn){
     case '~':
       // reserved by NMEA
     case '!':
+      //for AIS info
     case '$':
+      // for general NMEA info
       nmeaStatus = RECEIVING;
       nmeaIndex=0;
       break;
@@ -1606,6 +1663,7 @@ void setup() {
   show_string(  vessel_name,CENTER,132,8,RED,BLACK,false);
   show_string( program_name, CENTER, 195,2,WHITE,BLACK,false);
   show_string( program_version, CENTER,215,2,WHITE,BLACK,false);
+  delay(1000);
   flag_colour = YELLOW;
   
   #endif
