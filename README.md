@@ -1,4 +1,6 @@
 # The_NMEAtor
+
+Update November 18, 2020; Please use the Yazz_NMEAtor repository which contains the lastest version
  
 Introduction:
 
